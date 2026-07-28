@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PROJECT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$PROJECT_DIR"
 set -a
 # shellcheck disable=SC1091
@@ -20,4 +20,3 @@ curl --fail --silent --show-error \
   "http://127.0.0.1:21465/api/${WPP_SESSION}/status-session" \
   --header "Authorization: Bearer ${WPP_TOKEN}"
 printf '\n'
-
