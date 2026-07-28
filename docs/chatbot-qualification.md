@@ -1,0 +1,56 @@
+# Passo 4 — Chatbot de qualificação
+
+O gateway Baileys agora qualifica novos contatos antes de transferi-los para um
+atendente.
+
+## Fluxo
+
+1. O contato escolhe Vivo Móvel, Internet Empresarial, Energia, Aparelhos ou
+   Pós-venda.
+2. O bot solicita CNPJ e cidade/UF.
+3. Conforme o produto, solicita quantidade de linhas, valor da conta de energia
+   ou uma descrição da necessidade.
+4. Os dados são gravados nos atributos do contato e da conversa.
+5. A conversa recebe a etiqueta do produto e é atribuída à equipe correta.
+6. O bot para de responder após a transferência ou assim que um agente humano
+   envia uma mensagem.
+
+O contato pode digitar `menu` para reiniciar a qualificação e `6` ou
+`falar com atendente` para solicitar atendimento humano.
+
+## Dados preenchidos
+
+- CNPJ
+- cidade/UF
+- produto de interesse
+- quantidade de linhas
+- valor da conta de energia
+- origem do lead
+- status e resumo da qualificação
+
+## Ativação
+
+No `.env`:
+
+```env
+WHATSAPP_BOT_ENABLED=true
+```
+
+Depois, recrie o gateway:
+
+```bash
+docker compose up -d --build baileys
+```
+
+Para desativar o bot sem remover a integração, altere a variável para `false` e
+recrie o gateway.
+
+## Teste recomendado
+
+Use um número que ainda não tenha uma conversa ativa e envie `oi`. Complete
+todo o fluxo e confira no Chatwoot:
+
+- painel lateral do contato;
+- atributos da conversa;
+- etiquetas;
+- equipe atribuída.

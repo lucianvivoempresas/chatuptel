@@ -15,6 +15,16 @@ import pino from 'pino';
 import QRCode from 'qrcode';
 import qrcodeTerminal from 'qrcode-terminal';
 import { agentNameFromPayload, formatAgentMessage } from './message-format.js';
+import {
+  MENU_TEXT,
+  PRODUCT_OPTIONS,
+  formatCnpj,
+  formatCurrency,
+  isMenuRequest,
+  normalizeText,
+  parsePositiveInteger,
+  parseProduct,
+} from './qualification.js';
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -35,6 +45,9 @@ const config = {
   prefixAgentName: !['false', '0', 'no'].includes(
     String(process.env.WHATSAPP_PREFIX_AGENT_NAME || 'true').toLowerCase(),
   ),
+  botEnabled: !['false', '0', 'no'].includes(
+    String(process.env.WHATSAPP_BOT_ENABLED || 'true').toLowerCase(),
+  ),
 };
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
@@ -50,6 +63,7 @@ let state = { chats: {} };
 const processedMessages = new Set();
 const registeredJids = new Map();
 const sentMessages = new Map();
+const teamIds = new Map();
 
 class ChatwootRequestError extends Error {
   constructor(status, body) {
@@ -366,6 +380,320 @@ async function createIncomingMessage(conversationId, message, text) {
   );
 }
 
+async function createBotMessage(conversationId, content) {
+  return chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        content,
+        message_type: 'outgoing',
+        private: false,
+        content_type: 'text',
+        content_attributes: {
+          baileys_bot: true,
+          bot_name: 'Assistente Uptel Conecta',
+        },
+      }),
+    },
+  );
+}
+
+async function sendBotMessage(chat, jid, text) {
+  const content = `*Assistente Uptel Conecta:*\n${text}`;
+  await sendWhatsAppMessage(jid, { text: content });
+  try {
+    await createBotMessage(chat.conversationId, content);
+  } catch (error) {
+    logger.warn(
+      { conversationId: chat.conversationId, error: error.message },
+      'Mensagem do bot enviada ao WhatsApp, mas não registrada no Chatwoot',
+    );
+  }
+}
+
+async function updateContactAttributes(contactId, attributes) {
+  await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/contacts/${contactId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ custom_attributes: attributes }),
+    },
+  );
+}
+
+async function mergeConversationAttributes(conversationId, attributes) {
+  const conversation = await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}`,
+  );
+  await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/custom_attributes`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        custom_attributes: {
+          ...(conversation.custom_attributes || {}),
+          ...attributes,
+        },
+      }),
+    },
+  );
+}
+
+async function mergeConversationLabels(conversationId, newLabels) {
+  const response = await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/labels`,
+  );
+  const currentLabels = Array.isArray(response)
+    ? response
+    : Array.isArray(response.payload)
+      ? response.payload
+      : [];
+  const labels = [...new Set([...currentLabels, ...newLabels])];
+  await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/labels`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ labels }),
+    },
+  );
+}
+
+async function teamIdByName(teamName) {
+  if (teamIds.has(teamName)) return teamIds.get(teamName);
+  const response = await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/teams`,
+  );
+  const teams = Array.isArray(response) ? response : response.payload || [];
+  const team = teams.find(
+    (item) => normalizeText(item.name) === normalizeText(teamName),
+  );
+  if (!team) return null;
+  teamIds.set(teamName, team.id);
+  return team.id;
+}
+
+async function assignConversationTeam(conversationId, teamName) {
+  const teamId = await teamIdByName(teamName);
+  if (!teamId) {
+    logger.warn({ conversationId, teamName }, 'Equipe não encontrada no Chatwoot');
+    return;
+  }
+  await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/assignments`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ team_id: teamId }),
+    },
+  );
+}
+
+function newBotState() {
+  return {
+    stage: 'product',
+    answers: {},
+    handoff: false,
+    completed: false,
+  };
+}
+
+function qualificationSummary(answers) {
+  return [
+    answers.productName && `Produto: ${answers.productName}`,
+    answers.cnpj && `CNPJ: ${answers.cnpj}`,
+    answers.city && `Cidade/UF: ${answers.city}`,
+    answers.lines && `Linhas: ${answers.lines}`,
+    answers.energyValue && `Conta de energia: ${answers.energyValue}`,
+    answers.need && `Necessidade: ${answers.need}`,
+  ]
+    .filter(Boolean)
+    .join(' | ');
+}
+
+async function finishQualification(chat, jid) {
+  const bot = chat.bot;
+  const product = PRODUCT_OPTIONS[bot.answers.productKey];
+  const contactAttributes = {
+    produto_interesse: product.name,
+    cnpj: bot.answers.cnpj,
+    cidade_uf: bot.answers.city,
+    origem_lead: 'WhatsApp',
+  };
+  if (bot.answers.lines) contactAttributes.quantidade_linhas = bot.answers.lines;
+  if (bot.answers.energyValue) {
+    contactAttributes.valor_conta_energia = bot.answers.energyValue;
+  }
+
+  const summary = qualificationSummary(bot.answers);
+  await updateContactAttributes(chat.contactId, contactAttributes);
+  await mergeConversationAttributes(chat.conversationId, {
+    status_lead: 'Em qualificação',
+    proxima_acao: `Atendimento pela equipe ${product.team}`,
+    resumo_atendimento: summary,
+  });
+  await mergeConversationLabels(chat.conversationId, ['novo-lead', product.label]);
+  await assignConversationTeam(chat.conversationId, product.team);
+
+  bot.stage = 'completed';
+  bot.completed = true;
+  bot.handoff = true;
+  bot.completedAt = new Date().toISOString();
+  await saveState();
+  await sendBotMessage(
+    chat,
+    jid,
+    `Obrigado! Já registrei seus dados e encaminhei seu atendimento para nossa equipe de *${product.name}*.\n\nUm consultor continuará a conversa por aqui.`,
+  );
+  logger.info(
+    { conversationId: chat.conversationId, product: product.name, team: product.team },
+    'Lead qualificado e encaminhado',
+  );
+}
+
+async function handoffToHuman(chat, jid) {
+  chat.bot.handoff = true;
+  chat.bot.stage = 'handoff';
+  chat.bot.completedAt = new Date().toISOString();
+  await mergeConversationAttributes(chat.conversationId, {
+    status_lead: 'Em qualificação',
+    proxima_acao: 'Atendimento humano solicitado',
+  });
+  await assignConversationTeam(chat.conversationId, 'vendas');
+  await saveState();
+  await sendBotMessage(
+    chat,
+    jid,
+    'Certo! Encaminhei sua conversa para um de nossos atendentes. Assim que possível, alguém continuará o atendimento por aqui.',
+  );
+}
+
+async function processQualificationBot(chat, jid, text) {
+  if (!config.botEnabled) return;
+
+  if (!chat.bot || isMenuRequest(text)) {
+    chat.bot = newBotState();
+    await saveState();
+    const directProduct = parseProduct(text);
+    if (!directProduct) {
+      await sendBotMessage(chat, jid, MENU_TEXT);
+      return;
+    }
+  }
+
+  const bot = chat.bot;
+  if (bot.handoff) return;
+  if (parseProduct(text) === 'handoff') {
+    await handoffToHuman(chat, jid);
+    return;
+  }
+
+  if (bot.stage === 'product') {
+    const productKey = parseProduct(text);
+    if (productKey === 'handoff') {
+      await handoffToHuman(chat, jid);
+      return;
+    }
+    if (!productKey) {
+      await sendBotMessage(chat, jid, MENU_TEXT);
+      return;
+    }
+    const product = PRODUCT_OPTIONS[productKey];
+    bot.answers.productKey = productKey;
+    bot.answers.productName = product.name;
+    bot.stage = 'cnpj';
+    await saveState();
+    await sendBotMessage(
+      chat,
+      jid,
+      `Ótimo, vamos falar sobre *${product.name}*.\n\nInforme o CNPJ da empresa (14 números). Se não tiver CNPJ, responda *não tenho*.`,
+    );
+    return;
+  }
+
+  if (bot.stage === 'cnpj') {
+    const cnpj = formatCnpj(text);
+    if (!cnpj) {
+      await sendBotMessage(
+        chat,
+        jid,
+        'Não consegui identificar o CNPJ. Digite os 14 números ou responda *não tenho*.',
+      );
+      return;
+    }
+    bot.answers.cnpj = cnpj;
+    bot.stage = 'city';
+    await saveState();
+    await updateContactAttributes(chat.contactId, {
+      cnpj,
+      produto_interesse: bot.answers.productName,
+      origem_lead: 'WhatsApp',
+    });
+    await sendBotMessage(chat, jid, 'Qual é a sua *cidade e UF*? Exemplo: Salvador/BA');
+    return;
+  }
+
+  if (bot.stage === 'city') {
+    if (String(text || '').trim().length < 3) {
+      await sendBotMessage(chat, jid, 'Informe a cidade e o estado. Exemplo: Salvador/BA');
+      return;
+    }
+    bot.answers.city = String(text).trim().slice(0, 100);
+    const product = PRODUCT_OPTIONS[bot.answers.productKey];
+    bot.stage = product.nextStage;
+    await saveState();
+    await updateContactAttributes(chat.contactId, {
+      cidade_uf: bot.answers.city,
+    });
+    if (bot.stage === 'lines') {
+      await sendBotMessage(chat, jid, 'Quantas linhas móveis sua empresa precisa?');
+    } else if (bot.stage === 'energy_value') {
+      await sendBotMessage(
+        chat,
+        jid,
+        'Qual é o valor médio mensal da sua conta de energia? Exemplo: R$ 1.500,00',
+      );
+    } else {
+      await sendBotMessage(
+        chat,
+        jid,
+        'Descreva brevemente o que você precisa para que o consultor já receba seu atendimento completo.',
+      );
+    }
+    return;
+  }
+
+  if (bot.stage === 'lines') {
+    const lines = parsePositiveInteger(text);
+    if (!lines) {
+      await sendBotMessage(chat, jid, 'Informe uma quantidade válida de linhas. Exemplo: 10');
+      return;
+    }
+    bot.answers.lines = lines;
+    await finishQualification(chat, jid);
+    return;
+  }
+
+  if (bot.stage === 'energy_value') {
+    const energyValue = formatCurrency(text);
+    if (!energyValue) {
+      await sendBotMessage(chat, jid, 'Informe um valor válido. Exemplo: R$ 1.500,00');
+      return;
+    }
+    bot.answers.energyValue = energyValue;
+    await finishQualification(chat, jid);
+    return;
+  }
+
+  if (bot.stage === 'need') {
+    if (String(text || '').trim().length < 3) {
+      await sendBotMessage(chat, jid, 'Conte em poucas palavras o que você precisa.');
+      return;
+    }
+    bot.answers.need = String(text).trim().slice(0, 500);
+    await finishQualification(chat, jid);
+  }
+}
+
 async function handleIncoming(message) {
   const jid = message.key.remoteJid;
   if (
@@ -396,6 +724,7 @@ async function handleIncoming(message) {
     await createIncomingMessage(chat.conversationId, message, extractText(message));
   }
   logger.info({ jid, conversationId: chat.conversationId }, 'Mensagem recebida no Chatwoot');
+  await processQualificationBot(chat, chat.outboundJid || phoneJid, extractText(message));
 }
 
 function phoneJidFromPayload(payload) {
@@ -552,6 +881,7 @@ async function handleChatwootWebhook(payload) {
     payload.event !== 'message_created' ||
     payload.message_type !== 'outgoing' ||
     payload.private === true ||
+    payload.content_attributes?.baileys_bot === true ||
     (payloadInboxId > 0 && payloadInboxId !== config.chatwootInboxId)
   ) {
     return { ignored: true };
@@ -562,6 +892,17 @@ async function handleChatwootWebhook(payload) {
 
   const jid = await findJid(payload);
   if (!jid) throw new Error('Não foi possível identificar o destinatário');
+
+  const conversationId = Number(payload.conversation?.id || payload.conversation_id);
+  const mappedChat = Object.values(state.chats).find(
+    (chat) => Number(chat.conversationId) === conversationId,
+  );
+  if (mappedChat?.bot && !mappedChat.bot.handoff) {
+    mappedChat.bot.handoff = true;
+    mappedChat.bot.stage = 'human';
+    mappedChat.bot.handoffAt = new Date().toISOString();
+    await saveState();
+  }
 
   const agentName = agentNameFromPayload(payload);
   const formattedContent = formatAgentMessage(
