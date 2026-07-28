@@ -35,7 +35,7 @@ services:
     entrypoint: docker/entrypoints/rails.sh
     command: ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3100:3000"
     healthcheck:
       test: ["CMD-SHELL", "ruby -rnet/http -e \"exit(Net::HTTP.get_response(URI('http://127.0.0.1:3000/api')).is_a?(Net::HTTPSuccess) ? 0 : 1)\""]
       interval: 30s
@@ -85,30 +85,31 @@ services:
       retries: 10
     restart: unless-stopped
 
-  wppconnect:
+  baileys:
     build:
-      context: ./wppconnect
-      args:
-        WPP_VERSION: v2.10.0
+      context: ./baileys
+    depends_on:
+      rails:
+        condition: service_healthy
     environment:
-      WPP_SECRET_KEY: ${WPP_SECRET_KEY:?WPP_SECRET_KEY não definido}
-      WPP_DEVICE_NAME: ${WPP_DEVICE_NAME:-Volt Conect Atendimento}
+      BAILEYS_ADMIN_TOKEN: ${BAILEYS_ADMIN_TOKEN:?BAILEYS_ADMIN_TOKEN não definido}
+      CHATWOOT_URL: http://rails:3000
+      CHATWOOT_ACCOUNT_ID: ${CHATWOOT_ACCOUNT_ID:?CHATWOOT_ACCOUNT_ID não definido}
+      CHATWOOT_INBOX_ID: ${CHATWOOT_INBOX_ID:?CHATWOOT_INBOX_ID não definido}
+      CHATWOOT_API_TOKEN: ${CHATWOOT_API_TOKEN:?CHATWOOT_API_TOKEN não definido}
     volumes:
-      - wppconnect_tokens:/usr/src/wpp-server/tokens
-      - wppconnect_userdata:/usr/src/wpp-server/userDataDir
-      - wppconnect_logs:/usr/src/wpp-server/log
+      - baileys_data:/data
     ports:
-      # Administração somente por SSH/túnel local; nunca exponha 21465 publicamente.
-      - "127.0.0.1:21465:21465"
+      # Administração somente pelo servidor; nunca exponha esta porta publicamente.
+      - "127.0.0.1:3001:3001"
     networks:
       - app
-    shm_size: 1gb
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:21465/api-docs/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 10
-      start_period: 60s
+      start_period: 20s
     restart: unless-stopped
 
 networks:
@@ -119,7 +120,4 @@ volumes:
   chatwoot_storage:
   postgres_data:
   redis_data:
-  wppconnect_tokens:
-  wppconnect_userdata:
-  wppconnect_logs:
-
+  baileys_data:

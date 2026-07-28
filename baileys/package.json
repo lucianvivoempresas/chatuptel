@@ -1,0 +1,19 @@
+{
+  "name": "voltconect-baileys-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js",
+    "test:smoke": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "@hapi/boom": "10.0.1",
+    "@whiskeysockets/baileys": "7.0.0-rc13",
+    "express": "5.2.1",
+    "pino": "9.7.0",
+    "qrcode": "1.5.4",
+    "qrcode-terminal": "0.12.0"
+  }
+}
