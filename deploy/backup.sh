@@ -47,18 +47,30 @@ docker compose exec -T postgres pg_dump -U chatwoot -d chatwoot \
 # e o erro "file changed as we read it". O trap sempre religa o serviço.
 if docker compose ps --status running --services | grep -qx baileys; then
   BAILEYS_WAS_RUNNING=true
+  BAILEYS_CONTAINER=$(docker compose ps -q baileys)
   docker compose stop -t 20 baileys >/dev/null
+else
+  BAILEYS_CONTAINER=$(docker compose ps -a -q baileys)
 fi
-docker compose run --rm --no-deps --entrypoint tar baileys \
-  -czf - -C /data . > "${STAGE_DIR}/baileys-data.tar.gz"
+if [ -z "$BAILEYS_CONTAINER" ]; then
+  echo "ERRO: contêiner Baileys não encontrado." >&2
+  exit 1
+fi
+docker run --rm --volumes-from "${BAILEYS_CONTAINER}:ro" \
+  redis:7-alpine tar -czf - -C /data . \
+  > "${STAGE_DIR}/baileys-data.tar.gz"
 if [ "$BAILEYS_WAS_RUNNING" = true ]; then
   docker compose start baileys >/dev/null
   BAILEYS_WAS_RUNNING=false
 fi
 
-docker compose exec -T rails tar \
-  --ignore-failed-read --warning=no-file-changed \
-  -czf - -C /app/storage . \
+RAILS_CONTAINER=$(docker compose ps -q rails)
+if [ -z "$RAILS_CONTAINER" ]; then
+  echo "ERRO: contêiner Rails não encontrado." >&2
+  exit 1
+fi
+docker run --rm --volumes-from "${RAILS_CONTAINER}:ro" \
+  redis:7-alpine tar -czf - -C /app/storage . \
   > "${STAGE_DIR}/chatwoot-storage.tar.gz"
 
 cp docker-compose.yml "${STAGE_DIR}/docker-compose.yml"
