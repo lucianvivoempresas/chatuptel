@@ -159,6 +159,26 @@ Um agente pode participar de mais de uma equipe. No painel, digite `/` no
 campo de mensagem para localizar respostas prontas como `/saudacao`,
 `/aguarde`, `/cnpj`, `/fatura-energia` e `/encerrar`.
 
+## Configurar a qualificação comercial
+
+Crie os campos de cadastro do cliente e de acompanhamento da negociação:
+
+```bash
+sh ./scripts/configure-qualification.sh
+docker compose up -d --build baileys
+```
+
+Novas conversas recebidas pelo WhatsApp passam a entrar automaticamente com:
+
+- origem do lead: `WhatsApp`;
+- status do lead: `Novo`;
+- etiqueta: `novo-lead`.
+
+O atendente deve preencher CNPJ, razão social, cidade/UF, produto, quantidade
+de linhas, valor da conta de energia e vendedor responsável. Na conversa,
+deve atualizar status, próxima ação, follow-up, valor da proposta e resumo.
+O fluxo completo está em `docs/qualification-guide.md`.
+
 ## Conectar o WhatsApp
 
 Execute no servidor:

@@ -137,6 +137,29 @@ async function findExistingContact(identifier, phoneNumber) {
   );
 }
 
+async function ensureWhatsAppLeadOrigin(contact) {
+  if (contact.custom_attributes?.origem_lead) return contact;
+
+  try {
+    const updated = await chatwootRequest(
+      `/api/v1/accounts/${config.chatwootAccountId}/contacts/${contact.id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          custom_attributes: { origem_lead: 'WhatsApp' },
+        }),
+      },
+    );
+    return contactFromResponse(updated) || contact;
+  } catch (error) {
+    logger.warn(
+      { contactId: contact.id, error: error.message },
+      'Não foi possível registrar a origem do lead',
+    );
+    return contact;
+  }
+}
+
 async function ensureContactInbox(contact, preferredSourceId) {
   let contactInbox = contact.contact_inboxes?.find(
     (item) => Number(item.inbox?.id) === config.chatwootInboxId,
@@ -198,6 +221,9 @@ async function ensureConversation(jid, pushName, phoneJid = jid) {
             name: pushName || phoneNumber || jid,
             phone_number: phoneNumber,
             identifier,
+            custom_attributes: {
+              origem_lead: 'WhatsApp',
+            },
             additional_attributes: {
               whatsapp_jid: jid,
               whatsapp_phone_jid: outboundJid,
@@ -213,6 +239,7 @@ async function ensureConversation(jid, pushName, phoneJid = jid) {
       if (!contact) throw error;
     }
   }
+  contact = await ensureWhatsAppLeadOrigin(contact);
 
   const contactId = contact.id;
   const contactInbox = await ensureContactInbox(contact, identifier);
@@ -227,6 +254,9 @@ async function ensureConversation(jid, pushName, phoneJid = jid) {
         inbox_id: config.chatwootInboxId,
         contact_id: contactId,
         status: 'open',
+        custom_attributes: {
+          status_lead: 'Novo',
+        },
         additional_attributes: {
           whatsapp_jid: jid,
           whatsapp_phone_jid: outboundJid,
@@ -235,6 +265,21 @@ async function ensureConversation(jid, pushName, phoneJid = jid) {
       }),
     },
   );
+
+  try {
+    await chatwootRequest(
+      `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversation.id}/labels`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ labels: ['novo-lead'] }),
+      },
+    );
+  } catch (error) {
+    logger.warn(
+      { conversationId: conversation.id, error: error.message },
+      'Não foi possível aplicar a etiqueta novo-lead',
+    );
+  }
 
   state.chats[jid] = {
     contactId,
