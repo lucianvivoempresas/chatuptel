@@ -91,6 +91,15 @@ function phoneFromJid(jid) {
   return number ? `+${number}` : null;
 }
 
+function phoneJidFromValue(value) {
+  if (!value) return null;
+  const normalized = String(value).trim();
+  if (normalized.endsWith('@s.whatsapp.net')) return normalized;
+  if (normalized.includes('@')) return null;
+  const number = normalized.replace(/^whatsapp:/i, '').replace(/\D/g, '');
+  return number ? `${number}@s.whatsapp.net` : null;
+}
+
 function contactFromResponse(response) {
   const payload = response?.payload;
   if (Array.isArray(payload)) return payload[0] || null;
@@ -151,10 +160,15 @@ async function ensureContactInbox(contact, preferredSourceId) {
 }
 
 async function ensureConversation(jid, pushName, phoneJid = jid) {
+  const outboundJid = phoneJidFromValue(phoneJid);
   if (
     state.chats[jid]?.conversationId &&
     Number(state.chats[jid].inboxId) === config.chatwootInboxId
   ) {
+    if (outboundJid && state.chats[jid].outboundJid !== outboundJid) {
+      state.chats[jid].outboundJid = outboundJid;
+      await saveState();
+    }
     return state.chats[jid];
   }
 
@@ -173,7 +187,11 @@ async function ensureConversation(jid, pushName, phoneJid = jid) {
             name: pushName || phoneNumber || jid,
             phone_number: phoneNumber,
             identifier,
-            additional_attributes: { whatsapp_jid: jid, provider: 'baileys' },
+            additional_attributes: {
+              whatsapp_jid: jid,
+              whatsapp_phone_jid: outboundJid,
+              provider: 'baileys',
+            },
           }),
         },
       );
@@ -198,7 +216,11 @@ async function ensureConversation(jid, pushName, phoneJid = jid) {
         inbox_id: config.chatwootInboxId,
         contact_id: contactId,
         status: 'open',
-        additional_attributes: { whatsapp_jid: jid, provider: 'baileys' },
+        additional_attributes: {
+          whatsapp_jid: jid,
+          whatsapp_phone_jid: outboundJid,
+          provider: 'baileys',
+        },
       }),
     },
   );
@@ -208,6 +230,7 @@ async function ensureConversation(jid, pushName, phoneJid = jid) {
     sourceId,
     conversationId: conversation.id,
     inboxId: config.chatwootInboxId,
+    outboundJid,
   };
   await saveState();
   return state.chats[jid];
@@ -319,20 +342,59 @@ async function handleIncoming(message) {
   logger.info({ jid, conversationId: chat.conversationId }, 'Mensagem recebida no Chatwoot');
 }
 
-function findJid(payload) {
+function phoneJidFromPayload(payload) {
+  const candidates = [
+    payload.conversation?.additional_attributes?.whatsapp_phone_jid,
+    payload.conversation?.meta?.sender?.phone_number,
+    payload.meta?.sender?.phone_number,
+    payload.sender?.phone_number,
+    payload.conversation?.contact_inbox?.source_id,
+    payload.contact_inbox?.source_id,
+  ];
+  for (const candidate of candidates) {
+    const jid = phoneJidFromValue(candidate);
+    if (jid) return jid;
+  }
+  return null;
+}
+
+async function findJid(payload) {
   const conversationId = Number(payload.conversation?.id || payload.conversation_id);
   const mapped = Object.entries(state.chats).find(
     ([, chat]) => Number(chat.conversationId) === conversationId,
   );
-  if (mapped) return mapped[0];
+  if (mapped) {
+    const storedPhoneJid =
+      phoneJidFromValue(mapped[1].outboundJid) ||
+      phoneJidFromValue(mapped[1].sourceId);
+    if (storedPhoneJid) return storedPhoneJid;
+  }
+
+  const payloadPhoneJid = phoneJidFromPayload(payload);
+  if (payloadPhoneJid) return payloadPhoneJid;
 
   const explicitJid =
+    payload.conversation?.additional_attributes?.whatsapp_phone_jid ||
     payload.conversation?.additional_attributes?.whatsapp_jid ||
     payload.meta?.sender?.additional_attributes?.whatsapp_jid;
-  if (explicitJid) return explicitJid;
+  const explicitPhoneJid = phoneJidFromValue(explicitJid);
+  if (explicitPhoneJid) return explicitPhoneJid;
 
-  const phone = payload.meta?.sender?.phone_number?.replace(/\D/g, '');
-  return phone ? `${phone}@s.whatsapp.net` : null;
+  if (conversationId) {
+    const conversation = await chatwootRequest(
+      `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}`,
+    );
+    const conversationPhoneJid = phoneJidFromPayload({ conversation });
+    if (conversationPhoneJid) {
+      if (mapped) {
+        mapped[1].outboundJid = conversationPhoneJid;
+        await saveState();
+      }
+      return conversationPhoneJid;
+    }
+  }
+
+  return null;
 }
 
 async function sendAttachment(jid, attachment, caption) {
@@ -378,7 +440,7 @@ async function handleChatwootWebhook(payload) {
     throw new Error('WhatsApp desconectado');
   }
 
-  const jid = findJid(payload);
+  const jid = await findJid(payload);
   if (!jid) throw new Error('Não foi possível identificar o destinatário');
 
   const attachments = payload.attachments || [];
