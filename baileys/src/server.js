@@ -30,6 +30,7 @@ const config = {
   chatwootAccountId: required('CHATWOOT_ACCOUNT_ID'),
   chatwootInboxId: Number(required('CHATWOOT_INBOX_ID')),
   chatwootApiToken: required('CHATWOOT_API_TOKEN'),
+  defaultCountryCode: (process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '55').replace(/\D/g, ''),
 };
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
@@ -43,6 +44,8 @@ let connectionStatus = 'starting';
 let reconnectTimer;
 let state = { chats: {} };
 const processedMessages = new Set();
+const registeredJids = new Map();
+const sentMessages = new Map();
 
 class ChatwootRequestError extends Error {
   constructor(status, body) {
@@ -96,7 +99,11 @@ function phoneJidFromValue(value) {
   const normalized = String(value).trim();
   if (normalized.endsWith('@s.whatsapp.net')) return normalized;
   if (normalized.includes('@')) return null;
-  const number = normalized.replace(/^whatsapp:/i, '').replace(/\D/g, '');
+  let number = normalized.replace(/^whatsapp:/i, '').replace(/\D/g, '');
+  if (number.startsWith('0') && number.length >= 11) number = number.replace(/^0+/, '');
+  if ([10, 11].includes(number.length) && config.defaultCountryCode) {
+    number = `${config.defaultCountryCode}${number}`;
+  }
   return number ? `${number}@s.whatsapp.net` : null;
 }
 
@@ -409,19 +416,82 @@ async function sendAttachment(jid, attachment, caption) {
     : response.headers.get('content-type') || '';
 
   if (declaredType === 'image' || mimeType.startsWith('image/')) {
-    await socket.sendMessage(jid, { image: buffer, caption });
+    await sendWhatsAppMessage(jid, { image: buffer, caption });
   } else if (declaredType === 'video' || mimeType.startsWith('video/')) {
-    await socket.sendMessage(jid, { video: buffer, caption });
+    await sendWhatsAppMessage(jid, { video: buffer, caption });
   } else if (declaredType === 'audio' || mimeType.startsWith('audio/')) {
-    await socket.sendMessage(jid, { audio: buffer, mimetype: mimeType, ptt: false });
+    await sendWhatsAppMessage(jid, { audio: buffer, mimetype: mimeType, ptt: false });
   } else {
-    await socket.sendMessage(jid, {
+    await sendWhatsAppMessage(jid, {
       document: buffer,
       mimetype: mimeType || 'application/octet-stream',
       fileName: attachment.file_name || 'arquivo',
       caption,
     });
   }
+}
+
+function rememberSentMessage(message) {
+  if (!message?.key?.id) return;
+  sentMessages.set(message.key.id, message);
+  if (sentMessages.size > 2000) {
+    sentMessages.delete(sentMessages.keys().next().value);
+  }
+}
+
+async function validateWhatsAppJid(jid) {
+  const normalizedJid = phoneJidFromValue(jid);
+  if (!normalizedJid) throw new Error(`Número de WhatsApp inválido: ${jid}`);
+
+  const cached = registeredJids.get(normalizedJid);
+  if (cached && cached.expiresAt > Date.now()) return cached.jid;
+
+  const [result] = (await socket.onWhatsApp(normalizedJid)) || [];
+  if (!result?.exists) {
+    throw new Error(`O número ${normalizedJid.split('@')[0]} não possui WhatsApp`);
+  }
+
+  const registeredJid = phoneJidFromValue(result.jid) || normalizedJid;
+  registeredJids.set(normalizedJid, {
+    jid: registeredJid,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  });
+  return registeredJid;
+}
+
+function isRetryableWhatsAppError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  const statusCode = Number(error?.output?.statusCode || error?.statusCode || 0);
+  return (
+    [500, 503].includes(statusCode) ||
+    message.includes('service-unavailable') ||
+    message.includes('internal server error') ||
+    message.includes('connection')
+  );
+}
+
+async function sendWhatsAppMessage(jid, content) {
+  const registeredJid = await validateWhatsAppJid(jid);
+  let lastError;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const message = await socket.sendMessage(registeredJid, content);
+      rememberSentMessage(message);
+      return message;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableWhatsAppError(error) || attempt === 3) throw error;
+      const delayMs = attempt * 1500;
+      logger.warn(
+        { jid: registeredJid, attempt, delayMs, error: error.message },
+        'Envio temporariamente indisponível; tentando novamente',
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError;
 }
 
 async function handleChatwootWebhook(payload) {
@@ -449,7 +519,7 @@ async function handleChatwootWebhook(payload) {
       await sendAttachment(jid, attachment, index === 0 ? payload.content || '' : '');
     }
   } else if (payload.content) {
-    await socket.sendMessage(jid, { text: payload.content });
+    await sendWhatsAppMessage(jid, { text: payload.content });
   }
   logger.info({ jid, messageId: payload.id }, 'Resposta enviada ao WhatsApp');
   return { sent: true };
@@ -517,6 +587,7 @@ async function startWhatsApp() {
     markOnlineOnConnect: false,
     syncFullHistory: false,
     generateHighQualityLinkPreview: false,
+    getMessage: async (key) => sentMessages.get(key.id)?.message,
   });
 
   socket.ev.on('creds.update', saveCreds);
