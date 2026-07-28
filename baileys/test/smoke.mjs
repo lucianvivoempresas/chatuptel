@@ -16,6 +16,7 @@ const child = spawn(process.execPath, ['src/server.js'], {
     CHATWOOT_API_TOKEN: 'test-api-token',
     BAILEYS_AUTH_DIR: path.join(testDirectory, 'auth'),
     BAILEYS_STATE_FILE: path.join(testDirectory, 'state.json'),
+    BAILEYS_AUDIT_DIR: path.join(testDirectory, 'audit'),
     PORT: String(port),
     LOG_LEVEL: 'fatal',
   },
@@ -52,6 +53,14 @@ try {
   const status = await fetch(`http://127.0.0.1:${port}/status?token=test-token`);
   assert.equal(status.status, 200);
   assert.equal(typeof (await status.json()).status, 'string');
+
+  const operations = await fetch(
+    `http://127.0.0.1:${port}/operations/status?token=test-token`,
+  );
+  assert.equal(operations.status, 200);
+  const operationsBody = await operations.json();
+  assert.equal(operationsBody.pendingOutbound, 0);
+  assert.equal(operationsBody.rateLimits.globalPerMinute, 60);
 } finally {
   if (child.exitCode === null) {
     const exited = new Promise((resolve) => child.once('exit', resolve));

@@ -197,6 +197,26 @@ atendimento e não duplica contatos ou oportunidades.
 
 As instruções estão em `docs/energy-crm-integration.md`.
 
+## Segurança, estabilidade e backups
+
+O gateway mantém respostas em fila persistente, aplica limites seguros de
+envio e grava auditoria sem duplicar o texto integral das mensagens. O projeto
+também inclui backup criptografado, monitoramento por `systemd` e alertas de
+desconexão.
+
+Instale no servidor:
+
+```bash
+sudo ./deploy/install-operations.sh
+```
+
+Depois configure um destino realmente externo e, opcionalmente, alertas em
+`/etc/voltconnect-chat/operations.env`. O guia completo está em
+`docs/security-and-stability.md`.
+
+Os follow-ups enviados ao CRM são tarefas exclusivamente internas: exigem
+aprovação do atendente e não enviam mensagens automaticamente.
+
 ## Conectar o WhatsApp
 
 Execute no servidor:

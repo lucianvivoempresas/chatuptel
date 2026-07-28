@@ -1,0 +1,8 @@
+[Unit]
+Description=Monitor de conexão e filas do Uptel Conecta
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/deploy/monitor-baileys.sh

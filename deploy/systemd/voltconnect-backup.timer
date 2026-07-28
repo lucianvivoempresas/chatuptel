@@ -1,0 +1,10 @@
+[Unit]
+Description=Backup diário do Uptel Conecta
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 America/Sao_Paulo
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

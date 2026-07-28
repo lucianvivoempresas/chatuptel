@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import crypto from 'node:crypto';
 import express from 'express';
 import { Boom } from '@hapi/boom';
 import makeWASocket, {
@@ -52,6 +53,11 @@ const config = {
   energiaCrmIntegrationToken: String(
     process.env.ENERGIA_CRM_INTEGRATION_TOKEN || '',
   ).trim(),
+  auditDir: process.env.BAILEYS_AUDIT_DIR || '/data/audit',
+  auditRetentionDays: Math.max(1, Number(process.env.BAILEYS_AUDIT_RETENTION_DAYS || 90)),
+  globalPerMinute: Math.max(1, Number(process.env.WHATSAPP_GLOBAL_PER_MINUTE || 60)),
+  recipientPerMinute: Math.max(1, Number(process.env.WHATSAPP_RECIPIENT_PER_MINUTE || 10)),
+  agentDailyLimit: Math.max(1, Number(process.env.WHATSAPP_AGENT_DAILY_LIMIT || 500)),
 };
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
@@ -63,9 +69,17 @@ let socket;
 let currentQr = null;
 let connectionStatus = 'starting';
 let reconnectTimer;
-let state = { chats: {}, crmOutbox: {} };
+let state = {
+  chats: {},
+  crmOutbox: {},
+  outboundQueue: {},
+  outboundDelivered: {},
+  sendLimits: {},
+};
 let stateSaveQueue = Promise.resolve();
+let auditWriteQueue = Promise.resolve();
 let crmFlushRunning = false;
+let outboundFlushRunning = false;
 const processedMessages = new Set();
 const registeredJids = new Map();
 const sentMessages = new Map();
@@ -84,6 +98,9 @@ async function loadState() {
     state = JSON.parse(await fs.readFile(config.stateFile, 'utf8'));
     state.chats ||= {};
     state.crmOutbox ||= {};
+    state.outboundQueue ||= {};
+    state.outboundDelivered ||= {};
+    state.sendLimits ||= {};
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     await saveState();
@@ -99,6 +116,48 @@ async function saveState() {
   };
   stateSaveQueue = stateSaveQueue.then(write, write);
   return stateSaveQueue;
+}
+
+function auditHash(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+async function auditEvent(event, fields = {}) {
+  const timestamp = new Date().toISOString();
+  const day = timestamp.slice(0, 10);
+  const entry = {
+    timestamp,
+    event,
+    ...fields,
+  };
+  const write = async () => {
+    await fs.mkdir(config.auditDir, { recursive: true });
+    await fs.appendFile(
+      path.join(config.auditDir, `messages-${day}.jsonl`),
+      `${JSON.stringify(entry)}\n`,
+      { mode: 0o600 },
+    );
+  };
+  auditWriteQueue = auditWriteQueue.then(write, write);
+  return auditWriteQueue;
+}
+
+async function cleanOldAuditFiles() {
+  try {
+    const entries = await fs.readdir(config.auditDir, { withFileTypes: true });
+    const cutoff = Date.now() - config.auditRetentionDays * 24 * 60 * 60 * 1000;
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && /^messages-\d{4}-\d{2}-\d{2}\.jsonl$/.test(entry.name))
+        .map(async (entry) => {
+          const file = path.join(config.auditDir, entry.name);
+          const stat = await fs.stat(file);
+          if (stat.mtimeMs < cutoff) await fs.unlink(file);
+        }),
+    );
+  } catch (error) {
+    if (error.code !== 'ENOENT') logger.warn({ error: error.message }, 'Falha ao limpar auditoria');
+  }
 }
 
 async function chatwootRequest(endpoint, options = {}) {
@@ -414,6 +473,12 @@ async function createBotMessage(conversationId, content) {
 async function sendBotMessage(chat, jid, text) {
   const content = `*Assistente Uptel Conecta:*\n${text}`;
   await sendWhatsAppMessage(jid, { text: content });
+  await auditEvent('outbound_bot_sent', {
+    conversationId: chat.conversationId,
+    jid,
+    contentLength: content.length,
+    contentSha256: auditHash(content),
+  });
   try {
     await createBotMessage(chat.conversationId, content);
   } catch (error) {
@@ -914,8 +979,17 @@ async function handleIncoming(message) {
     chat = await ensureConversation(jid, message.pushName, phoneJid);
     await createIncomingMessage(chat.conversationId, message, extractText(message));
   }
+  const text = extractText(message);
   logger.info({ jid, conversationId: chat.conversationId }, 'Mensagem recebida no Chatwoot');
-  await processQualificationBot(chat, chat.outboundJid || phoneJid, extractText(message));
+  await auditEvent('inbound_received', {
+    conversationId: chat.conversationId,
+    whatsappMessageId: message.key.id,
+    jid: chat.outboundJid || phoneJid,
+    contentLength: text.length,
+    contentSha256: auditHash(text),
+    hasMedia: Boolean(message.message && !text),
+  });
+  await processQualificationBot(chat, chat.outboundJid || phoneJid, text);
 }
 
 function phoneJidFromPayload(payload) {
@@ -1064,6 +1138,147 @@ async function sendWhatsAppMessage(jid, content) {
   throw lastError;
 }
 
+const globalSendTimes = [];
+const recipientSendTimes = new Map();
+
+function localDay() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function rateLimitDelay(job) {
+  const now = Date.now();
+  const oneMinuteAgo = now - 60_000;
+  while (globalSendTimes.length && globalSendTimes[0] <= oneMinuteAgo) {
+    globalSendTimes.shift();
+  }
+  const recipientTimes = recipientSendTimes.get(job.jid) || [];
+  while (recipientTimes.length && recipientTimes[0] <= oneMinuteAgo) {
+    recipientTimes.shift();
+  }
+  recipientSendTimes.set(job.jid, recipientTimes);
+
+  const day = localDay();
+  if (state.sendLimits.day !== day) state.sendLimits = { day, agents: {} };
+  state.sendLimits.agents ||= {};
+  const agentKey = String(job.agentId || job.agentName || 'unknown');
+  const dailyTotal = Number(state.sendLimits.agents[agentKey] || 0);
+
+  if (dailyTotal >= config.agentDailyLimit) return 15 * 60_000;
+  if (globalSendTimes.length >= config.globalPerMinute) {
+    return Math.max(1000, globalSendTimes[0] + 60_000 - now);
+  }
+  if (recipientTimes.length >= config.recipientPerMinute) {
+    return Math.max(1000, recipientTimes[0] + 60_000 - now);
+  }
+  return 0;
+}
+
+function recordRateUsage(job) {
+  const now = Date.now();
+  globalSendTimes.push(now);
+  const recipientTimes = recipientSendTimes.get(job.jid) || [];
+  recipientTimes.push(now);
+  recipientSendTimes.set(job.jid, recipientTimes);
+  const agentKey = String(job.agentId || job.agentName || 'unknown');
+  state.sendLimits.agents[agentKey] = Number(state.sendLimits.agents[agentKey] || 0) + 1;
+}
+
+async function deliverOutboundJob(job) {
+  const attachments = job.attachments || [];
+  if (attachments.length) {
+    for (const [index, attachment] of attachments.entries()) {
+      const caption = index === 0 ? job.formattedContent : '';
+      if (
+        index === 0 &&
+        !caption &&
+        job.agentName &&
+        config.prefixAgentName &&
+        (attachment.file_type === 'audio' || attachment.content_type?.startsWith('audio/'))
+      ) {
+        await sendWhatsAppMessage(job.jid, { text: `*${job.agentName}:*` });
+      }
+      await sendAttachment(job.jid, attachment, caption);
+    }
+  } else if (job.formattedContent) {
+    await sendWhatsAppMessage(job.jid, { text: job.formattedContent });
+  }
+}
+
+async function flushOutboundQueue() {
+  if (outboundFlushRunning || connectionStatus !== 'connected' || !socket) return;
+  outboundFlushRunning = true;
+  try {
+    const jobs = Object.values(state.outboundQueue || {})
+      .filter((job) => Number(job.nextAttemptAt || 0) <= Date.now())
+      .sort((left, right) => Number(left.createdAt || 0) - Number(right.createdAt || 0));
+    const job = jobs[0];
+    if (!job) return;
+
+    const delay = rateLimitDelay(job);
+    if (delay > 0) {
+      job.nextAttemptAt = Date.now() + delay;
+      job.lastError = 'Aguardando limite seguro de envio';
+      await auditEvent('outbound_rate_limited', {
+        chatwootMessageId: job.messageId,
+        conversationId: job.conversationId,
+        jid: job.jid,
+        agentId: job.agentId,
+        delayMs: delay,
+      });
+      await saveState();
+      return;
+    }
+
+    try {
+      await deliverOutboundJob(job);
+      recordRateUsage(job);
+      delete state.outboundQueue[job.key];
+      state.outboundDelivered[job.key] = Date.now();
+      const deliveredKeys = Object.keys(state.outboundDelivered);
+      for (const oldKey of deliveredKeys.slice(0, Math.max(0, deliveredKeys.length - 2000))) {
+        delete state.outboundDelivered[oldKey];
+      }
+      await auditEvent('outbound_human_sent', {
+        chatwootMessageId: job.messageId,
+        conversationId: job.conversationId,
+        jid: job.jid,
+        agentId: job.agentId,
+        agentName: job.agentName,
+        contentLength: job.formattedContent.length,
+        contentSha256: auditHash(job.formattedContent),
+        attachmentCount: job.attachments.length,
+      });
+      logger.info(
+        { jid: job.jid, messageId: job.messageId, agentName: job.agentName },
+        'Resposta enviada ao WhatsApp',
+      );
+      await saveState();
+    } catch (error) {
+      job.attempts = Number(job.attempts || 0) + 1;
+      job.lastError = String(error.message || error).slice(0, 500);
+      job.nextAttemptAt =
+        Date.now() + Math.min(60 * 60_000, Math.max(5_000, 5_000 * 2 ** job.attempts));
+      await auditEvent('outbound_send_failed', {
+        chatwootMessageId: job.messageId,
+        conversationId: job.conversationId,
+        jid: job.jid,
+        agentId: job.agentId,
+        attempts: job.attempts,
+        error: job.lastError,
+      });
+      await saveState();
+      logger.error({ err: error, messageId: job.messageId }, 'Resposta mantida na fila para retry');
+    }
+  } finally {
+    outboundFlushRunning = false;
+  }
+}
+
 async function handleChatwootWebhook(payload) {
   const payloadInboxId = Number(
     payload.inbox?.id || payload.conversation?.inbox_id || payload.inbox_id || 0,
@@ -1077,10 +1292,6 @@ async function handleChatwootWebhook(payload) {
   ) {
     return { ignored: true };
   }
-  if (connectionStatus !== 'connected' || !socket) {
-    throw new Error('WhatsApp desconectado');
-  }
-
   const jid = await findJid(payload);
   if (!jid) throw new Error('Não foi possível identificar o destinatário');
 
@@ -1102,25 +1313,27 @@ async function handleChatwootWebhook(payload) {
     config.prefixAgentName,
   );
   const attachments = payload.attachments || [];
-  if (attachments.length) {
-    for (const [index, attachment] of attachments.entries()) {
-      const caption = index === 0 ? formattedContent : '';
-      if (
-        index === 0 &&
-        !caption &&
-        agentName &&
-        config.prefixAgentName &&
-        (attachment.file_type === 'audio' || attachment.content_type?.startsWith('audio/'))
-      ) {
-        await sendWhatsAppMessage(jid, { text: `*${agentName}:*` });
-      }
-      await sendAttachment(jid, attachment, caption);
-    }
-  } else if (formattedContent) {
-    await sendWhatsAppMessage(jid, { text: formattedContent });
-  }
-  logger.info({ jid, messageId: payload.id, agentName }, 'Resposta enviada ao WhatsApp');
-  return { sent: true };
+  const key = String(payload.id || `${conversationId}-${auditHash(formattedContent).slice(0, 16)}`);
+  if (state.outboundDelivered[key]) return { sent: true, duplicate: true };
+  if (state.outboundQueue[key]) return { queued: true, duplicate: true };
+
+  state.outboundQueue[key] = {
+    key,
+    messageId: payload.id || null,
+    conversationId,
+    jid,
+    agentId: payload.sender?.id || payload.user?.id || null,
+    agentName,
+    formattedContent,
+    attachments,
+    attempts: 0,
+    createdAt: Date.now(),
+    nextAttemptAt: Date.now(),
+    lastError: null,
+  };
+  await saveState();
+  void flushOutboundQueue();
+  return { queued: true, connected: connectionStatus === 'connected' };
 }
 
 function authorized(request) {
@@ -1138,6 +1351,29 @@ app.get('/status', (request, response) => {
     status: connectionStatus,
     connectedNumber: socket?.user?.id || null,
     qrAvailable: Boolean(currentQr),
+    pendingOutbound: Object.keys(state.outboundQueue || {}).length,
+    pendingCrmSync: Object.keys(state.crmOutbox || {}).length,
+  });
+});
+
+app.get('/operations/status', (request, response) => {
+  if (!authorized(request)) return response.status(401).json({ error: 'NÃ£o autorizado' });
+  const outbound = Object.values(state.outboundQueue || {});
+  return response.json({
+    connection: connectionStatus,
+    connectedNumber: socket?.user?.id || null,
+    pendingOutbound: outbound.length,
+    failedOutbound: outbound.filter((job) => Number(job.attempts || 0) > 0).length,
+    oldestOutboundAt: outbound.length
+      ? new Date(Math.min(...outbound.map((job) => Number(job.createdAt)))).toISOString()
+      : null,
+    pendingCrmSync: Object.keys(state.crmOutbox || {}).length,
+    rateLimits: {
+      globalPerMinute: config.globalPerMinute,
+      recipientPerMinute: config.recipientPerMinute,
+      agentDailyLimit: config.agentDailyLimit,
+    },
+    auditRetentionDays: config.auditRetentionDays,
   });
 });
 
@@ -1236,6 +1472,8 @@ async function startWhatsApp() {
     if (connection === 'open') {
       currentQr = null;
       connectionStatus = 'connected';
+      void auditEvent('connection_open', { connectedNumber: socket.user?.id || null });
+      void flushOutboundQueue();
       logger.info({ user: socket.user }, 'WhatsApp conectado');
     }
     if (connection === 'close') {
@@ -1243,6 +1481,7 @@ async function startWhatsApp() {
       const statusCode = new Boom(lastDisconnect?.error).output.statusCode;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
       connectionStatus = loggedOut ? 'logged_out' : 'reconnecting';
+      void auditEvent('connection_closed', { statusCode, loggedOut });
       logger.warn({ statusCode, loggedOut }, 'Conexão com WhatsApp encerrada');
       if (!loggedOut) reconnectTimer = setTimeout(startWhatsApp, 5000);
     }
@@ -1250,6 +1489,7 @@ async function startWhatsApp() {
 }
 
 await loadState();
+await cleanOldAuditFiles();
 app.listen(config.port, '0.0.0.0', () => {
   logger.info({ port: config.port }, 'Gateway Baileys iniciado');
 });
@@ -1257,6 +1497,10 @@ const crmSyncTimer = setInterval(() => {
   void flushEnergiaCrmOutbox();
 }, 30000);
 crmSyncTimer.unref();
+const outboundTimer = setInterval(() => {
+  void flushOutboundQueue();
+}, 2000);
+outboundTimer.unref();
 if (Object.keys(state.crmOutbox).length > 0) {
   if (energiaCrmConfigured()) {
     void flushEnergiaCrmOutbox();

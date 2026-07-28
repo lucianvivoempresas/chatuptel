@@ -1,0 +1,10 @@
+[Unit]
+Description=Verificação periódica do Uptel Conecta
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=1m
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
