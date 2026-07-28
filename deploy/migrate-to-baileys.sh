@@ -93,6 +93,8 @@ awk -v token="$new_chatwoot_token" '
 ' .env > "$env_file_tmp"
 mv "$env_file_tmp" .env
 chmod 600 .env
+CHATWOOT_API_TOKEN="$new_chatwoot_token"
+export CHATWOOT_API_TOKEN
 
 printf '%s\n' "$configure_output" | sed '/^CHATWOOT_TOKEN=/d'
 
@@ -109,7 +111,14 @@ until curl --fail --silent http://127.0.0.1:3001/health >/dev/null 2>&1; do
   sleep 2
 done
 
-echo
-echo "Gateway Baileys instalado. Escaneie o QR Code abaixo:"
-echo
-./scripts/baileys-qr.sh
+gateway_status=$(./scripts/baileys-status.sh)
+if printf '%s' "$gateway_status" | grep -q '"status":"connected"'; then
+  echo
+  echo "Gateway Baileys instalado e WhatsApp conectado."
+  printf '%s\n' "$gateway_status"
+else
+  echo
+  echo "Gateway Baileys instalado. Escaneie o QR Code abaixo:"
+  echo
+  ./scripts/baileys-qr.sh
+fi
