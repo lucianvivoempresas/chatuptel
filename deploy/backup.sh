@@ -23,7 +23,12 @@ case "$STAGE_DIR" in
   "${BACKUP_DIR}"/.stage.*) ;;
   *) echo "ERRO: diretório temporário fora da pasta de backup." >&2; exit 1 ;;
 esac
+BAILEYS_WAS_RUNNING=false
 cleanup() {
+  if [ "$BAILEYS_WAS_RUNNING" = true ]; then
+    cd "$PROJECT_DIR"
+    docker compose start baileys >/dev/null 2>&1 || true
+  fi
   rm -rf -- "$STAGE_DIR"
 }
 trap cleanup EXIT HUP INT TERM
@@ -37,9 +42,23 @@ fi
 cd "$PROJECT_DIR"
 docker compose exec -T postgres pg_dump -U chatwoot -d chatwoot \
   | gzip -9 > "${STAGE_DIR}/postgres.sql.gz"
-docker compose exec -T baileys tar -czf - -C /data . \
-  > "${STAGE_DIR}/baileys-data.tar.gz"
-docker compose exec -T rails tar -czf - -C /app/storage . \
+
+# A sessão muda continuamente. Uma pausa curta evita um arquivo inconsistente
+# e o erro "file changed as we read it". O trap sempre religa o serviço.
+if docker compose ps --status running --services | grep -qx baileys; then
+  BAILEYS_WAS_RUNNING=true
+  docker compose stop -t 20 baileys >/dev/null
+fi
+docker compose run --rm --no-deps --entrypoint tar baileys \
+  -czf - -C /data . > "${STAGE_DIR}/baileys-data.tar.gz"
+if [ "$BAILEYS_WAS_RUNNING" = true ]; then
+  docker compose start baileys >/dev/null
+  BAILEYS_WAS_RUNNING=false
+fi
+
+docker compose exec -T rails tar \
+  --ignore-failed-read --warning=no-file-changed \
+  -czf - -C /app/storage . \
   > "${STAGE_DIR}/chatwoot-storage.tar.gz"
 
 cp docker-compose.yml "${STAGE_DIR}/docker-compose.yml"

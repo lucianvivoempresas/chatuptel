@@ -28,6 +28,11 @@ sudo systemctl status voltconnect-backup.service --no-pager
 O monitor roda a cada minuto e o backup diariamente às 03:15 no horário de
 São Paulo.
 
+Durante a cópia da sessão, o contêiner Baileys é pausado por poucos segundos e
+religado automaticamente, inclusive se o backup falhar. O monitor só alerta
+uma desconexão após dois minutos, evitando alarmes durante reinicializações
+normais.
+
 ## Destino externo
 
 Um backup no mesmo VPS não protege contra perda do servidor. Edite:
