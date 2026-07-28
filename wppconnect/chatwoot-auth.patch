@@ -1,0 +1,29 @@
+diff --git a/src/controller/deviceController.ts b/src/controller/deviceController.ts
+index 5de446c..d055bbf 100644
+--- a/src/controller/deviceController.ts
++++ b/src/controller/deviceController.ts
+@@ -2247,6 +2247,6 @@ export async function chatWoot(req: Request, res: Response): Promise<any> {
+      }
+    */
+-  const { session } = req.params;
++  const session = req.session;
+   const client: any = clientsArray[session];
+   if (client == null || client.status !== 'CONNECTED') return;
+   try {
+diff --git a/src/routes/index.ts b/src/routes/index.ts
+index 268165e..1bc8c49 100644
+--- a/src/routes/index.ts
++++ b/src/routes/index.ts
+@@ -953,7 +953,11 @@ routes.post(
+   NewsletterController.muteNewsletter
+ );
+ 
+-routes.post('/api/:session/chatwoot', DeviceController.chatWoot);
++routes.post(
++  '/api/:session/chatwoot',
++  verifyToken,
++  DeviceController.chatWoot
++);
+ 
+ // Api Doc
+ routes.use('/api-docs', swaggerUi.serve as any);
