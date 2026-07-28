@@ -7,7 +7,7 @@ atendente.
 
 1. O contato escolhe Vivo Móvel, Internet Empresarial, Energia, Aparelhos ou
    Pós-venda.
-2. O bot solicita CNPJ e cidade/UF.
+2. O bot solicita nome do contato, CNPJ, razão social e cidade/UF.
 3. Conforme o produto, solicita quantidade de linhas, valor da conta de energia
    ou uma descrição da necessidade.
 4. Os dados são gravados nos atributos do contato e da conversa.
@@ -21,6 +21,8 @@ O contato pode digitar `menu` para reiniciar a qualificação e `6` ou
 ## Dados preenchidos
 
 - CNPJ
+- nome do contato
+- razão social
 - cidade/UF
 - produto de interesse
 - quantidade de linhas

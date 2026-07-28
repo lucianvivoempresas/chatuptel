@@ -422,6 +422,16 @@ async function updateContactAttributes(contactId, attributes) {
   );
 }
 
+async function updateContactName(contactId, name) {
+  await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/contacts/${contactId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    },
+  );
+}
+
 async function mergeConversationAttributes(conversationId, attributes) {
   const conversation = await chatwootRequest(
     `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}`,
@@ -499,6 +509,8 @@ function newBotState() {
 
 function qualificationSummary(answers) {
   return [
+    answers.contactName && `Contato: ${answers.contactName}`,
+    answers.companyName && `Empresa: ${answers.companyName}`,
     answers.productName && `Produto: ${answers.productName}`,
     answers.cnpj && `CNPJ: ${answers.cnpj}`,
     answers.city && `Cidade/UF: ${answers.city}`,
@@ -516,6 +528,7 @@ async function finishQualification(chat, jid) {
   const contactAttributes = {
     produto_interesse: product.name,
     cnpj: bot.answers.cnpj,
+    razao_social: bot.answers.companyName,
     cidade_uf: bot.answers.city,
     origem_lead: 'WhatsApp',
   };
@@ -600,12 +613,30 @@ async function processQualificationBot(chat, jid, text) {
     const product = PRODUCT_OPTIONS[productKey];
     bot.answers.productKey = productKey;
     bot.answers.productName = product.name;
-    bot.stage = 'cnpj';
+    bot.stage = 'name';
     await saveState();
     await sendBotMessage(
       chat,
       jid,
-      `Ótimo, vamos falar sobre *${product.name}*.\n\nInforme o CNPJ da empresa (14 números). Se não tiver CNPJ, responda *não tenho*.`,
+      `Ótimo, vamos falar sobre *${product.name}*.\n\nPrimeiro, qual é o seu *nome*?`,
+    );
+    return;
+  }
+
+  if (bot.stage === 'name') {
+    const contactName = String(text || '').trim();
+    if (contactName.length < 2 || /\d{5,}/.test(contactName)) {
+      await sendBotMessage(chat, jid, 'Por favor, informe seu nome.');
+      return;
+    }
+    bot.answers.contactName = contactName.slice(0, 100);
+    bot.stage = 'cnpj';
+    await saveState();
+    await updateContactName(chat.contactId, bot.answers.contactName);
+    await sendBotMessage(
+      chat,
+      jid,
+      'Informe o CNPJ da empresa (14 números). Se não tiver CNPJ, responda *não tenho*.',
     );
     return;
   }
@@ -621,12 +652,32 @@ async function processQualificationBot(chat, jid, text) {
       return;
     }
     bot.answers.cnpj = cnpj;
-    bot.stage = 'city';
+    bot.stage = 'company';
     await saveState();
     await updateContactAttributes(chat.contactId, {
       cnpj,
       produto_interesse: bot.answers.productName,
       origem_lead: 'WhatsApp',
+    });
+    await sendBotMessage(
+      chat,
+      jid,
+      'Qual é o *nome ou razão social da empresa*?',
+    );
+    return;
+  }
+
+  if (bot.stage === 'company') {
+    const companyName = String(text || '').trim();
+    if (companyName.length < 2) {
+      await sendBotMessage(chat, jid, 'Informe o nome ou a razão social da empresa.');
+      return;
+    }
+    bot.answers.companyName = companyName.slice(0, 150);
+    bot.stage = 'city';
+    await saveState();
+    await updateContactAttributes(chat.contactId, {
+      razao_social: bot.answers.companyName,
     });
     await sendBotMessage(chat, jid, 'Qual é a sua *cidade e UF*? Exemplo: Salvador/BA');
     return;

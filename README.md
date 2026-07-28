@@ -181,8 +181,8 @@ O fluxo completo está em `docs/qualification-guide.md`.
 
 ## Chatbot de qualificação
 
-Com `WHATSAPP_BOT_ENABLED=true`, o Assistente Uptel Conecta coleta produto,
-CNPJ, cidade/UF e as informações específicas da oportunidade. Ao concluir, ele
+Com `WHATSAPP_BOT_ENABLED=true`, o Assistente Uptel Conecta coleta nome,
+empresa, produto, CNPJ, cidade/UF e as informações específicas da oportunidade. Ao concluir, ele
 preenche o contato e a conversa, aplica a etiqueta do produto e encaminha para
 Vendas, Energia ou Pós-venda. O bot para automaticamente quando um atendente
 humano responde.
