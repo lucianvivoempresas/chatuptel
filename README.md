@@ -239,6 +239,13 @@ O resultado esperado contém `"status":"connected"`. A sessão fica persistida
 no volume `baileys_data`, portanto o QR não é solicitado após reinicializações
 normais.
 
+## Importar histórico do WhatsApp
+
+É possível realizar uma sincronização única e idempotente dos últimos 30 dias.
+Ela exige remover o aparelho conectado anterior e escanear um novo QR Code.
+Mensagens históricas não acionam o chatbot nem o CRM. Veja o procedimento em
+`docs/history-import.md`.
+
 ## Migrar uma instalação que usava WPPConnect
 
 Na instalação existente, o processo é automático:

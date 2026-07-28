@@ -61,6 +61,12 @@ try {
   const operationsBody = await operations.json();
   assert.equal(operationsBody.pendingOutbound, 0);
   assert.equal(operationsBody.rateLimits.globalPerMinute, 60);
+
+  const history = await fetch(`http://127.0.0.1:${port}/history/status?token=test-token`);
+  assert.equal(history.status, 200);
+  const historyBody = await history.json();
+  assert.equal(historyBody.enabled, false);
+  assert.equal(historyBody.days, 0);
 } finally {
   if (child.exitCode === null) {
     const exited = new Promise((resolve) => child.once('exit', resolve));

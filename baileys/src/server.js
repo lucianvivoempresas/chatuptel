@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import { Boom } from '@hapi/boom';
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
@@ -58,6 +59,10 @@ const config = {
   globalPerMinute: Math.max(1, Number(process.env.WHATSAPP_GLOBAL_PER_MINUTE || 60)),
   recipientPerMinute: Math.max(1, Number(process.env.WHATSAPP_RECIPIENT_PER_MINUTE || 10)),
   agentDailyLimit: Math.max(1, Number(process.env.WHATSAPP_AGENT_DAILY_LIMIT || 500)),
+  historySyncDays: Math.max(
+    0,
+    Math.min(30, Number(process.env.WHATSAPP_HISTORY_SYNC_DAYS || 0)),
+  ),
 };
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
@@ -75,15 +80,20 @@ let state = {
   outboundQueue: {},
   outboundDelivered: {},
   sendLimits: {},
+  historyImported: {},
+  historyStats: {},
 };
 let stateSaveQueue = Promise.resolve();
 let auditWriteQueue = Promise.resolve();
 let crmFlushRunning = false;
 let outboundFlushRunning = false;
+let historyImportQueue = Promise.resolve();
 const processedMessages = new Set();
 const registeredJids = new Map();
 const sentMessages = new Map();
 const teamIds = new Map();
+const historyContacts = new Map();
+const historyLidToPn = new Map();
 
 class ChatwootRequestError extends Error {
   constructor(status, body) {
@@ -101,6 +111,8 @@ async function loadState() {
     state.outboundQueue ||= {};
     state.outboundDelivered ||= {};
     state.sendLimits ||= {};
+    state.historyImported ||= {};
+    state.historyStats ||= {};
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     await saveState();
@@ -278,7 +290,8 @@ async function ensureContactInbox(contact, preferredSourceId) {
   }
 }
 
-async function ensureConversation(jid, pushName, phoneJid = jid) {
+async function ensureConversation(jid, pushName, phoneJid = jid, options = {}) {
+  const historical = options.historical === true;
   const outboundJid = phoneJidFromValue(phoneJid);
   if (
     state.chats[jid]?.conversationId &&
@@ -324,7 +337,7 @@ async function ensureConversation(jid, pushName, phoneJid = jid) {
       if (!contact) throw error;
     }
   }
-  contact = await ensureWhatsAppLeadOrigin(contact);
+  if (!historical) contact = await ensureWhatsAppLeadOrigin(contact);
 
   const contactId = contact.id;
   const contactInbox = await ensureContactInbox(contact, identifier);
@@ -338,32 +351,33 @@ async function ensureConversation(jid, pushName, phoneJid = jid) {
         source_id: sourceId,
         inbox_id: config.chatwootInboxId,
         contact_id: contactId,
-        status: 'open',
-        custom_attributes: {
-          status_lead: 'Novo',
-        },
+        status: historical ? 'resolved' : 'open',
+        custom_attributes: historical ? {} : { status_lead: 'Novo' },
         additional_attributes: {
           whatsapp_jid: jid,
           whatsapp_phone_jid: outboundJid,
           provider: 'baileys',
+          history_imported: historical,
         },
       }),
     },
   );
 
-  try {
-    await chatwootRequest(
-      `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversation.id}/labels`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ labels: ['novo-lead'] }),
-      },
-    );
-  } catch (error) {
-    logger.warn(
-      { conversationId: conversation.id, error: error.message },
-      'Não foi possível aplicar a etiqueta novo-lead',
-    );
+  if (!historical) {
+    try {
+      await chatwootRequest(
+        `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversation.id}/labels`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ labels: ['novo-lead'] }),
+        },
+      );
+    } catch (error) {
+      logger.warn(
+        { conversationId: conversation.id, error: error.message },
+        'Não foi possível aplicar a etiqueta novo-lead',
+      );
+    }
   }
 
   state.chats[jid] = {
@@ -416,7 +430,13 @@ function mediaInfo(message) {
   };
 }
 
-async function createIncomingMessage(conversationId, message, text) {
+async function createIncomingMessage(conversationId, message, text, options = {}) {
+  const messageType = options.messageType || 'incoming';
+  const contentAttributes = {
+    whatsapp_message_id: message.key.id,
+    ...(options.contentAttributes || {}),
+  };
+  const externalCreatedAt = options.externalCreatedAt || null;
   const media = mediaInfo(message);
   if (!media) {
     return chatwootRequest(
@@ -425,10 +445,12 @@ async function createIncomingMessage(conversationId, message, text) {
         method: 'POST',
         body: JSON.stringify({
           content: text,
-          message_type: 'incoming',
+          message_type: messageType,
           private: false,
           content_type: 'text',
-          content_attributes: { whatsapp_message_id: message.key.id },
+          content_attributes: contentAttributes,
+          external_created_at: externalCreatedAt,
+          source_id: message.key.id,
         }),
       },
     );
@@ -442,8 +464,11 @@ async function createIncomingMessage(conversationId, message, text) {
   );
   const form = new FormData();
   form.append('content', text || media.filename);
-  form.append('message_type', 'incoming');
+  form.append('message_type', messageType);
   form.append('private', 'false');
+  form.append('content_attributes', JSON.stringify(contentAttributes));
+  form.append('source_id', message.key.id);
+  if (externalCreatedAt) form.append('external_created_at', externalCreatedAt);
   form.append('attachments[]', new Blob([buffer], { type: media.mimeType }), media.filename);
   return chatwootRequest(
     `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`,
@@ -979,6 +1004,8 @@ async function handleIncoming(message) {
     chat = await ensureConversation(jid, message.pushName, phoneJid);
     await createIncomingMessage(chat.conversationId, message, extractText(message));
   }
+  state.historyImported[`${phoneJid}:${message.key.id}`] = messageTimestampSeconds(message);
+  await saveState();
   const text = extractText(message);
   logger.info({ jid, conversationId: chat.conversationId }, 'Mensagem recebida no Chatwoot');
   await auditEvent('inbound_received', {
@@ -990,6 +1017,142 @@ async function handleIncoming(message) {
     hasMedia: Boolean(message.message && !text),
   });
   await processQualificationBot(chat, chat.outboundJid || phoneJid, text);
+}
+
+function messageTimestampSeconds(message) {
+  const value = Number(message?.messageTimestamp || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+async function importHistoricalMessage(message, contactsByJid) {
+  const jid = message.key?.remoteJid;
+  const messageId = message.key?.id;
+  if (
+    !jid ||
+    !messageId ||
+    jid.endsWith('@g.us') ||
+    jid === 'status@broadcast' ||
+    jid.endsWith('@newsletter')
+  ) {
+    return 'skipped';
+  }
+
+  const timestamp = messageTimestampSeconds(message);
+  const cutoff = Date.now() / 1000 - config.historySyncDays * 24 * 60 * 60;
+  if (!timestamp || timestamp < cutoff) return 'skipped';
+
+  const mappedPn = historyLidToPn.get(jid);
+  const phoneJid =
+    message.key.remoteJidAlt?.endsWith('@s.whatsapp.net')
+      ? message.key.remoteJidAlt
+      : phoneJidFromValue(mappedPn) || jid;
+  const dedupeKey = `${phoneJid}:${messageId}`;
+  if (state.historyImported[dedupeKey]) return 'duplicate';
+  const contact = contactsByJid.get(jid) || contactsByJid.get(phoneJid) || {};
+  const pushName = contact.name || contact.notify || message.pushName || phoneFromJid(phoneJid);
+  const chat = await ensureConversation(jid, pushName, phoneJid, { historical: true });
+  const text = extractText(message);
+  const options = {
+    messageType: message.key.fromMe ? 'outgoing' : 'incoming',
+    externalCreatedAt: new Date(timestamp * 1000).toISOString(),
+    contentAttributes: {
+      baileys_history_import: true,
+      whatsapp_original_timestamp: timestamp,
+      original_direction: message.key.fromMe ? 'outgoing' : 'incoming',
+    },
+  };
+
+  try {
+    await createIncomingMessage(chat.conversationId, message, text, options);
+  } catch (error) {
+    if (!mediaInfo(message)) throw error;
+    await chatwootRequest(
+      `/api/v1/accounts/${config.chatwootAccountId}/conversations/${chat.conversationId}/messages`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          content: text || '[Mídia antiga indisponível para download]',
+          message_type: options.messageType,
+          private: false,
+          content_type: 'text',
+          content_attributes: {
+            ...options.contentAttributes,
+            whatsapp_message_id: messageId,
+            media_download_failed: true,
+          },
+          external_created_at: options.externalCreatedAt,
+          source_id: messageId,
+        }),
+      },
+    );
+  }
+
+  state.historyImported[dedupeKey] = timestamp;
+  await auditEvent('history_message_imported', {
+    conversationId: chat.conversationId,
+    whatsappMessageId: messageId,
+    jid: phoneJid,
+    direction: options.messageType,
+    originalTimestamp: timestamp,
+    contentLength: text.length,
+    contentSha256: auditHash(text),
+  });
+  return 'imported';
+}
+
+async function importHistoryChunk({
+  contacts = [],
+  messages = [],
+  lidPnMappings = [],
+  progress,
+  syncType,
+  isLatest,
+}) {
+  if (config.historySyncDays <= 0) return;
+  for (const mapping of lidPnMappings) {
+    if (mapping.lid && mapping.pn) historyLidToPn.set(mapping.lid, mapping.pn);
+  }
+  for (const contact of contacts) {
+    if (contact.id) historyContacts.set(contact.id, contact);
+    if (contact.lid) historyContacts.set(contact.lid, contact);
+  }
+
+  state.historyStats.startedAt ||= new Date().toISOString();
+  state.historyStats.received = Number(state.historyStats.received || 0) + messages.length;
+  const sorted = [...messages].sort(
+    (left, right) => messageTimestampSeconds(left) - messageTimestampSeconds(right),
+  );
+  let processedInChunk = 0;
+  for (const message of sorted) {
+    try {
+      const result = await importHistoricalMessage(message, historyContacts);
+      state.historyStats[result] = Number(state.historyStats[result] || 0) + 1;
+    } catch (error) {
+      state.historyStats.failed = Number(state.historyStats.failed || 0) + 1;
+      state.historyStats.lastError = String(error.message || error).slice(0, 500);
+      logger.error(
+        { err: error, messageId: message.key?.id },
+        'Falha ao importar mensagem histórica',
+      );
+    }
+    processedInChunk += 1;
+    if (processedInChunk % 25 === 0) await saveState();
+  }
+  state.historyStats.progress = progress ?? state.historyStats.progress ?? null;
+  state.historyStats.syncType = syncType ?? state.historyStats.syncType ?? null;
+  state.historyStats.isLatest = Boolean(isLatest);
+  state.historyStats.updatedAt = new Date().toISOString();
+  await saveState();
+  logger.info(
+    {
+      received: messages.length,
+      imported: state.historyStats.imported || 0,
+      failed: state.historyStats.failed || 0,
+      progress,
+      isLatest,
+    },
+    'Lote de histórico processado',
+  );
 }
 
 function phoneJidFromPayload(payload) {
@@ -1122,6 +1285,9 @@ async function sendWhatsAppMessage(jid, content) {
     try {
       const message = await socket.sendMessage(registeredJid, content);
       rememberSentMessage(message);
+      if (message?.key?.id) {
+        state.historyImported[`${registeredJid}:${message.key.id}`] = Math.floor(Date.now() / 1000);
+      }
       return message;
     } catch (error) {
       lastError = error;
@@ -1288,6 +1454,7 @@ async function handleChatwootWebhook(payload) {
     payload.message_type !== 'outgoing' ||
     payload.private === true ||
     payload.content_attributes?.baileys_bot === true ||
+    payload.content_attributes?.baileys_history_import === true ||
     (payloadInboxId > 0 && payloadInboxId !== config.chatwootInboxId)
   ) {
     return { ignored: true };
@@ -1374,6 +1541,21 @@ app.get('/operations/status', (request, response) => {
       agentDailyLimit: config.agentDailyLimit,
     },
     auditRetentionDays: config.auditRetentionDays,
+    history: {
+      enabled: config.historySyncDays > 0,
+      days: config.historySyncDays,
+      ...state.historyStats,
+    },
+  });
+});
+
+app.get('/history/status', (request, response) => {
+  if (!authorized(request)) return response.status(401).json({ error: 'Não autorizado' });
+  return response.json({
+    enabled: config.historySyncDays > 0,
+    days: config.historySyncDays,
+    importedIds: Object.keys(state.historyImported || {}).length,
+    ...state.historyStats,
   });
 });
 
@@ -1445,13 +1627,26 @@ async function startWhatsApp() {
     version,
     auth: authState,
     logger: baileysLogger,
+    browser: Browsers.macOS('Desktop'),
     markOnlineOnConnect: false,
-    syncFullHistory: false,
+    syncFullHistory: config.historySyncDays > 0,
+    shouldSyncHistoryMessage: () => config.historySyncDays > 0,
     generateHighQualityLinkPreview: false,
     getMessage: async (key) => sentMessages.get(key.id)?.message,
   });
 
   socket.ev.on('creds.update', saveCreds);
+  socket.ev.on('messaging-history.set', (history) => {
+    historyImportQueue = historyImportQueue
+      .then(() => importHistoryChunk(history))
+      .catch((error) => logger.error({ err: error }, 'Falha ao processar lote de histórico'));
+  });
+  socket.ev.on('messaging-history.status', (historyStatus) => {
+    state.historyStats.status = historyStatus.status;
+    state.historyStats.explicitCompletion = historyStatus.explicit;
+    state.historyStats.statusUpdatedAt = new Date().toISOString();
+    void saveState();
+  });
   socket.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     for (const message of messages) {
