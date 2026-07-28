@@ -128,6 +128,37 @@ Edition, outro membro da mesma caixa ainda pode abrir e responder a conversa;
 por isso, a transferência deve ser feita antes de outro agente assumir o
 atendimento.
 
+## Configurar a operação
+
+Crie as equipes `vendas`, `energia` e `pos-venda`, as etiquetas comerciais e
+dez respostas prontas:
+
+```bash
+sh ./scripts/configure-operation.sh
+```
+
+O script perguntará se deve ativar o horário padrão:
+
+- segunda a sexta: 08h às 18h;
+- sábado: 08h às 13h;
+- domingo: fechado;
+- fuso horário: `America/Sao_Paulo`.
+
+Responder `N` mantém o controle de horário desativado. Os itens existentes são
+atualizados sem criar duplicidades.
+
+Para adicionar um agente a uma equipe:
+
+```bash
+sh ./scripts/assign-team.sh "agente@voltconect.com.br" "vendas"
+sh ./scripts/assign-team.sh "agente@voltconect.com.br" "energia"
+sh ./scripts/assign-team.sh "agente@voltconect.com.br" "pos-venda"
+```
+
+Um agente pode participar de mais de uma equipe. No painel, digite `/` no
+campo de mensagem para localizar respostas prontas como `/saudacao`,
+`/aguarde`, `/cnpj`, `/fatura-energia` e `/encerrar`.
+
 ## Conectar o WhatsApp
 
 Execute no servidor:
