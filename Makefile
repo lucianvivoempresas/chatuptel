@@ -1,4 +1,4 @@
-.PHONY: config prepare up down logs status wpp-start backup update
+.PHONY: config prepare up down logs status qr whatsapp-status backup update
 
 config:
 	docker compose config --quiet
@@ -18,15 +18,17 @@ logs:
 status:
 	docker compose ps
 
-wpp-start:
-	./scripts/wpp-start.sh
+qr:
+	./scripts/baileys-qr.sh
+
+whatsapp-status:
+	./scripts/baileys-status.sh
 
 backup:
 	./deploy/backup.sh
 
 update:
 	docker compose pull
-	docker compose build --pull wppconnect
+	docker compose build --pull baileys
 	docker compose run --rm rails bundle exec rails db:chatwoot_prepare
 	docker compose up -d
-

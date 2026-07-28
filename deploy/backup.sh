@@ -11,5 +11,9 @@ cd "$PROJECT_DIR"
 docker compose exec -T postgres pg_dump -U chatwoot -d chatwoot \
   | gzip > "${BACKUP_DIR}/chatwoot-${TIMESTAMP}.sql.gz"
 
-echo "Backup criado: ${BACKUP_DIR}/chatwoot-${TIMESTAMP}.sql.gz"
-echo "Copie-o para armazenamento externo criptografado."
+docker compose run --rm --no-deps \
+  -v "${BACKUP_DIR}:/backup" \
+  baileys tar -czf "/backup/baileys-${TIMESTAMP}.tar.gz" -C /data .
+
+echo "Backups criados em: ${BACKUP_DIR}"
+echo "O backup do Baileys contém a sessão do WhatsApp. Proteja-o e copie-o para armazenamento externo criptografado."
