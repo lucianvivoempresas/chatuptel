@@ -83,7 +83,7 @@ webhook.save!
 
 puts "#{legacy_count} webhook(s) antigo(s) do WPPConnect removido(s)." if legacy_count.positive?
 puts "Webhook do Chatwoot configurado automaticamente."
-puts "Caixa API '#{inbox.name}' configurada com ID #{inbox.id}."
+puts "Caixa API #{inbox.name} configurada com ID #{inbox.id}."
 puts "CHATWOOT_TOKEN=#{access_token.token}"
 puts "CHATWOOT_INBOX=#{inbox.id}"
 ')
