@@ -50,54 +50,64 @@ until curl --fail --silent http://127.0.0.1:3001/health >/dev/null 2>&1; do
   sleep 2
 done
 
-python3 - <<'PY'
-import json
-import os
-import urllib.request
+configure_output=$(docker compose exec -T \
+  -e CHATWOOT_ACCOUNT_ID="$CHATWOOT_ACCOUNT_ID" \
+  -e BAILEYS_ADMIN_TOKEN="$BAILEYS_ADMIN_TOKEN" \
+  rails bundle exec rails runner '
+account_id = ENV.fetch("CHATWOOT_ACCOUNT_ID").to_i
+account_user = AccountUser.find_by!(account_id: account_id, role: :administrator)
+access_token = account_user.user.access_token || AccessToken.create!(owner: account_user.user)
+webhook_url = "http://baileys:3001/webhooks/chatwoot?token=#{ENV.fetch("BAILEYS_ADMIN_TOKEN")}"
 
-account_id = os.environ["CHATWOOT_ACCOUNT_ID"]
-api_token = os.environ["CHATWOOT_API_TOKEN"]
-baileys_token = os.environ["BAILEYS_ADMIN_TOKEN"]
-base_url = f"http://127.0.0.1:3100/api/v1/accounts/{account_id}/webhooks"
-webhook_url = (
-    "http://baileys:3001/webhooks/chatwoot?token=" + baileys_token
-)
+legacy_webhooks = Webhook.where(account_id: account_id).where("LOWER(url) LIKE ?", "%wppconnect%")
+legacy_count = legacy_webhooks.count
+legacy_webhooks.destroy_all
 
-def request(url, method="GET", payload=None):
-    data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(
-        url,
-        data=data,
-        method=method,
-        headers={
-            "api_access_token": api_token,
-            "Content-Type": "application/json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=20) as response:
-        return json.loads(response.read() or b"{}")
+webhook = Webhook.find_or_initialize_by(account_id: account_id, url: webhook_url)
+webhook.subscriptions = ["message_created"]
+webhook.save!
 
-existing = request(base_url)
-items = existing.get("payload", existing) if isinstance(existing, dict) else existing
-old_webhooks = [
-    item for item in items
-    if "wppconnect" in (item.get("url") or "").lower()
-]
-for item in old_webhooks:
-    request(f"{base_url}/{item['id']}", method="DELETE")
-if old_webhooks:
-    print(f"{len(old_webhooks)} webhook(s) antigo(s) do WPPConnect removido(s).")
+puts "#{legacy_count} webhook(s) antigo(s) do WPPConnect removido(s)." if legacy_count.positive?
+puts "Webhook do Chatwoot configurado automaticamente."
+puts "CHATWOOT_TOKEN=#{access_token.token}"
+')
 
-if not any(item.get("url") == webhook_url for item in items):
-    request(
-        base_url,
-        method="POST",
-        payload={"url": webhook_url, "subscriptions": ["message_created"]},
-    )
-    print("Webhook do Chatwoot criado automaticamente.")
-else:
-    print("Webhook do Chatwoot já estava configurado.")
-PY
+new_chatwoot_token=$(printf '%s\n' "$configure_output" | sed -n 's/^CHATWOOT_TOKEN=//p' | tail -n 1)
+if [ -z "$new_chatwoot_token" ]; then
+  echo "Não foi possível obter um token válido do Chatwoot." >&2
+  exit 1
+fi
+
+env_file_tmp="${PROJECT_DIR}/.env.baileys.tmp"
+awk -v token="$new_chatwoot_token" '
+  BEGIN { replaced = 0 }
+  /^CHATWOOT_API_TOKEN=/ {
+    print "CHATWOOT_API_TOKEN=" token
+    replaced = 1
+    next
+  }
+  { print }
+  END {
+    if (!replaced) print "CHATWOOT_API_TOKEN=" token
+  }
+' .env > "$env_file_tmp"
+mv "$env_file_tmp" .env
+chmod 600 .env
+
+printf '%s\n' "$configure_output" | sed '/^CHATWOOT_TOKEN=/d'
+
+docker compose up -d --force-recreate baileys
+
+attempt=0
+until curl --fail --silent http://127.0.0.1:3001/health >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 20 ]; then
+    echo "O gateway não reiniciou após atualizar o token. Últimos logs:" >&2
+    docker compose logs --tail=100 baileys >&2
+    exit 1
+  fi
+  sleep 2
+done
 
 echo
 echo "Gateway Baileys instalado. Escaneie o QR Code abaixo:"
