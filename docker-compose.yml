@@ -20,6 +20,9 @@ x-chatwoot: &chatwoot
     FORCE_SSL: "false"
   volumes:
     - chatwoot_storage:/app/storage
+    - ./branding/uptel-conecta-logo.svg:/app/public/brand-assets/logo.svg:ro
+    - ./branding/uptel-conecta-logo-dark.svg:/app/public/brand-assets/logo_dark.svg:ro
+    - ./branding/uptel-conecta-thumbnail.svg:/app/public/brand-assets/logo_thumbnail.svg:ro
   networks:
     - app
   restart: unless-stopped
@@ -98,6 +101,7 @@ services:
       CHATWOOT_INBOX_ID: ${CHATWOOT_INBOX_ID:?CHATWOOT_INBOX_ID não definido}
       CHATWOOT_API_TOKEN: ${CHATWOOT_API_TOKEN:?CHATWOOT_API_TOKEN não definido}
       WHATSAPP_DEFAULT_COUNTRY_CODE: ${WHATSAPP_DEFAULT_COUNTRY_CODE:-55}
+      WHATSAPP_PREFIX_AGENT_NAME: ${WHATSAPP_PREFIX_AGENT_NAME:-true}
     volumes:
       - baileys_data:/data
     ports:

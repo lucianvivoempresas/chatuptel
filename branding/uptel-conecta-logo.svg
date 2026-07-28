@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="80" viewBox="0 0 320 80" role="img" aria-labelledby="title">
+  <title id="title">Uptel Conecta</title>
+  <defs>
+    <linearGradient id="brandGradient" x1="8" y1="8" x2="68" y2="72" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#00A86B"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="72" height="72" rx="22" fill="url(#brandGradient)"/>
+  <path d="M23 27.5C23 21.7 27.7 17 33.5 17h13C52.3 17 57 21.7 57 27.5v11C57 44.3 52.3 49 46.5 49H37l-10.5 9v-9.8A10.5 10.5 0 0 1 23 40.5v-13Z" fill="#fff"/>
+  <circle cx="33" cy="33" r="2.5" fill="#2563EB"/>
+  <circle cx="40" cy="33" r="2.5" fill="#00A86B"/>
+  <circle cx="47" cy="33" r="2.5" fill="#2563EB"/>
+  <text x="94" y="39" fill="#172033" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700">Uptel</text>
+  <text x="94" y="62" fill="#00A86B" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="600">Conecta</text>
+</svg>

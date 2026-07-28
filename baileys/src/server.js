@@ -14,6 +14,7 @@ import makeWASocket, {
 import pino from 'pino';
 import QRCode from 'qrcode';
 import qrcodeTerminal from 'qrcode-terminal';
+import { agentNameFromPayload, formatAgentMessage } from './message-format.js';
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -31,6 +32,9 @@ const config = {
   chatwootInboxId: Number(required('CHATWOOT_INBOX_ID')),
   chatwootApiToken: required('CHATWOOT_API_TOKEN'),
   defaultCountryCode: (process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '55').replace(/\D/g, ''),
+  prefixAgentName: !['false', '0', 'no'].includes(
+    String(process.env.WHATSAPP_PREFIX_AGENT_NAME || 'true').toLowerCase(),
+  ),
 };
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
@@ -420,6 +424,7 @@ async function sendAttachment(jid, attachment, caption) {
   } else if (declaredType === 'video' || mimeType.startsWith('video/')) {
     await sendWhatsAppMessage(jid, { video: buffer, caption });
   } else if (declaredType === 'audio' || mimeType.startsWith('audio/')) {
+    if (caption) await sendWhatsAppMessage(jid, { text: caption });
     await sendWhatsAppMessage(jid, { audio: buffer, mimetype: mimeType, ptt: false });
   } else {
     await sendWhatsAppMessage(jid, {
@@ -513,15 +518,31 @@ async function handleChatwootWebhook(payload) {
   const jid = await findJid(payload);
   if (!jid) throw new Error('Não foi possível identificar o destinatário');
 
+  const agentName = agentNameFromPayload(payload);
+  const formattedContent = formatAgentMessage(
+    payload.content,
+    payload,
+    config.prefixAgentName,
+  );
   const attachments = payload.attachments || [];
   if (attachments.length) {
     for (const [index, attachment] of attachments.entries()) {
-      await sendAttachment(jid, attachment, index === 0 ? payload.content || '' : '');
+      const caption = index === 0 ? formattedContent : '';
+      if (
+        index === 0 &&
+        !caption &&
+        agentName &&
+        config.prefixAgentName &&
+        (attachment.file_type === 'audio' || attachment.content_type?.startsWith('audio/'))
+      ) {
+        await sendWhatsAppMessage(jid, { text: `*${agentName}:*` });
+      }
+      await sendAttachment(jid, attachment, caption);
     }
-  } else if (payload.content) {
-    await sendWhatsAppMessage(jid, { text: payload.content });
+  } else if (formattedContent) {
+    await sendWhatsAppMessage(jid, { text: formattedContent });
   }
-  logger.info({ jid, messageId: payload.id }, 'Resposta enviada ao WhatsApp');
+  logger.info({ jid, messageId: payload.id, agentName }, 'Resposta enviada ao WhatsApp');
   return { sent: true };
 }
 

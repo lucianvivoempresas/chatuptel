@@ -1,4 +1,4 @@
-# Volt Conect Chat
+# Uptel Conecta
 
 Atendimento multiusuário com:
 
@@ -62,7 +62,7 @@ BAILEYS_ADMIN_TOKEN=outro-segredo-gerado-com-openssl
 ```
 
 4. Execute o instalador. Ele cria ou reutiliza automaticamente uma caixa do tipo
-   **API** chamada `WhatsApp Volt Conect`, adiciona os usuários da conta, gera
+   **API** chamada `WhatsApp Uptel Conecta`, adiciona os usuários da conta, gera
    um token válido e grava o ID correto no `.env`:
 
 ```bash
@@ -71,7 +71,44 @@ BAILEYS_ADMIN_TOKEN=outro-segredo-gerado-com-openssl
 
 O cartão WhatsApp nativo do Chatwoot é exclusivo da API oficial da Meta. Ele
 continuará desativado ao usar Baileys; a conexão aparecerá como a caixa API
-`WhatsApp Volt Conect`.
+`WhatsApp Uptel Conecta`.
+
+## Identificação dos atendentes
+
+As respostas públicas enviadas pelo Chatwoot recebem automaticamente o nome
+do atendente no WhatsApp:
+
+```text
+*Lucian Oliveira:*
+Olá! Como posso ajudar?
+```
+
+O nome vem do perfil do agente no Chatwoot. Para desativar o prefixo, altere
+`WHATSAPP_PREFIX_AGENT_NAME=false` no `.env` e recrie o contêiner `baileys`.
+Áudios sem legenda recebem uma pequena mensagem de identificação antes do
+arquivo.
+
+## Identidade visual
+
+O instalador configura a instalação como **Uptel Conecta**, renomeia a caixa
+do WhatsApp e aplica logotipos próprios nos modos claro e escuro. Os arquivos
+ficam na pasta `branding/` e são montados no contêiner sem modificar a imagem
+oficial do Chatwoot.
+
+Depois de atualizar a marca, recarregue a página sem cache (`Ctrl+F5`). O
+favicon pode permanecer no cache do navegador por alguns minutos.
+
+## Criar agentes sem servidor de e-mail
+
+Enquanto o SMTP não estiver configurado, o administrador pode criar um agente
+já confirmado, definir a senha diretamente e adicioná-lo à caixa do WhatsApp:
+
+```bash
+sh ./scripts/create-agent.sh "Nome do agente" "agente@voltconect.com.br"
+```
+
+A senha é solicitada no terminal e não aparece na tela nem no histórico do
+shell. Cada pessoa deve receber um usuário individual.
 
 ## Conectar o WhatsApp
 
@@ -147,7 +184,7 @@ docker compose logs --tail=100 baileys
 
 O gateway suporta texto, imagens, documentos, áudio e vídeo. Mensagens de
 grupos e Status são ignoradas. Respostas privadas do Chatwoot também são
-ignoradas.
+ignoradas. As mensagens enviadas pelo painel incluem o nome do agente.
 
 ## Licenças
 

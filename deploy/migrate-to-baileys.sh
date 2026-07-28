@@ -57,18 +57,56 @@ configure_output=$(docker compose exec -T \
   rails bundle exec rails runner '
 account_id = ENV.fetch("CHATWOOT_ACCOUNT_ID").to_i
 account = Account.find(account_id)
+
+# Identidade da instalação. Os arquivos são fornecidos pelo volume
+# /app/public/brand-assets definido no docker-compose.yml.
+brand_settings = {
+  "INSTALLATION_NAME" => "Uptel Conecta",
+  "BRAND_NAME" => "Uptel Conecta",
+  "BRAND_URL" => "https://www.voltconect.com.br",
+  "WIDGET_BRAND_URL" => "https://www.voltconect.com.br",
+  "LOGO" => "/brand-assets/logo.svg",
+  "LOGO_DARK" => "/brand-assets/logo_dark.svg",
+  "LOGO_THUMBNAIL" => "/brand-assets/logo_thumbnail.svg",
+  "DISPLAY_MANIFEST" => false
+}
+brand_settings.each do |name, value|
+  setting = InstallationConfig.find_or_initialize_by(name: name)
+  setting.value = value
+  setting.save!
+end
+account.update!(name: "Uptel Conecta") unless account.name == "Uptel Conecta"
+
+# Contas criadas antes da carga das configurações da instalação podem ficar
+# com todas as funcionalidades ocultas no painel. Reaplica somente os recursos
+# que a própria instalação marca como habilitados por padrão.
+feature_config = InstallationConfig.find_by(name: "ACCOUNT_LEVEL_FEATURE_DEFAULTS")
+default_features =
+  if feature_config&.value.is_a?(Array)
+    feature_config.value.filter_map do |feature|
+      name = feature["name"] || feature[:name]
+      enabled = feature["enabled"].nil? ? feature[:enabled] : feature["enabled"]
+      name if enabled
+    end
+  else
+    Featurable::FEATURE_LIST.select { |feature| feature["enabled"] }.pluck("name")
+  end
+account.enable_features!(*default_features)
+
 account_user = account.account_users.find_by!(role: :administrator)
 access_token = account_user.user.access_token || AccessToken.create!(owner: account_user.user)
 webhook_url = "http://baileys:3001/webhooks/chatwoot?token=#{ENV.fetch("BAILEYS_ADMIN_TOKEN")}"
 
 requested_inbox_id = ENV.fetch("CHATWOOT_INBOX_ID", "").to_i
-inbox = account.inboxes.where(channel_type: "Channel::Api").find_by(name: "WhatsApp Volt Conect")
+inbox = account.inboxes.where(channel_type: "Channel::Api").find_by(name: "WhatsApp Uptel Conecta")
+inbox ||= account.inboxes.where(channel_type: "Channel::Api").find_by(name: "WhatsApp Volt Conect")
 inbox ||= account.inboxes.where(channel_type: "Channel::Api").find_by(id: requested_inbox_id) if requested_inbox_id.positive?
 
 unless inbox
   channel = Channel::Api.create!(account: account)
-  inbox = Inbox.create!(account: account, channel: channel, name: "WhatsApp Volt Conect")
+  inbox = Inbox.create!(account: account, channel: channel, name: "WhatsApp Uptel Conecta")
 end
+inbox.update!(name: "WhatsApp Uptel Conecta") unless inbox.name == "WhatsApp Uptel Conecta"
 
 missing_member_ids = account.users.ids - inbox.members.ids
 inbox.add_members(missing_member_ids) if missing_member_ids.any?
@@ -82,6 +120,8 @@ webhook.subscriptions = ["message_created"]
 webhook.save!
 
 puts "#{legacy_count} webhook(s) antigo(s) do WPPConnect removido(s)." if legacy_count.positive?
+puts "Identidade visual Uptel Conecta aplicada."
+puts "#{default_features.length} funcionalidades padrão da conta habilitadas."
 puts "Webhook do Chatwoot configurado automaticamente."
 puts "Caixa API #{inbox.name} configurada com ID #{inbox.id}."
 puts "CHATWOOT_TOKEN=#{access_token.token}"
