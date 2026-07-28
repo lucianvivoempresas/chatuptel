@@ -79,6 +79,15 @@ def request(url, method="GET", payload=None):
 
 existing = request(base_url)
 items = existing.get("payload", existing) if isinstance(existing, dict) else existing
+old_webhooks = [
+    item for item in items
+    if "wppconnect" in (item.get("url") or "").lower()
+]
+for item in old_webhooks:
+    request(f"{base_url}/{item['id']}", method="DELETE")
+if old_webhooks:
+    print(f"{len(old_webhooks)} webhook(s) antigo(s) do WPPConnect removido(s).")
+
 if not any(item.get("url") == webhook_url for item in items):
     request(
         base_url,
