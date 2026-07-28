@@ -103,6 +103,10 @@ services:
       WHATSAPP_DEFAULT_COUNTRY_CODE: ${WHATSAPP_DEFAULT_COUNTRY_CODE:-55}
       WHATSAPP_PREFIX_AGENT_NAME: ${WHATSAPP_PREFIX_AGENT_NAME:-true}
       WHATSAPP_BOT_ENABLED: ${WHATSAPP_BOT_ENABLED:-true}
+      ENERGIA_CRM_URL: ${ENERGIA_CRM_URL:-}
+      ENERGIA_CRM_INTEGRATION_TOKEN: ${ENERGIA_CRM_INTEGRATION_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - baileys_data:/data
     ports:

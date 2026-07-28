@@ -189,6 +189,14 @@ humano responde.
 
 O fluxo e o roteiro de teste estão em `docs/chatbot-qualification.md`.
 
+## Integração com o CRM EnergiaVolt
+
+Leads qualificados como Energia são enviados por uma fila persistente para o
+CRM em `www.voltconect.com.br/energia`. A sincronização não bloqueia o
+atendimento e não duplica contatos ou oportunidades.
+
+As instruções estão em `docs/energy-crm-integration.md`.
+
 ## Conectar o WhatsApp
 
 Execute no servidor:

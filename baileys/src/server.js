@@ -48,6 +48,10 @@ const config = {
   botEnabled: !['false', '0', 'no'].includes(
     String(process.env.WHATSAPP_BOT_ENABLED || 'true').toLowerCase(),
   ),
+  energiaCrmUrl: String(process.env.ENERGIA_CRM_URL || '').trim().replace(/\/+$/, ''),
+  energiaCrmIntegrationToken: String(
+    process.env.ENERGIA_CRM_INTEGRATION_TOKEN || '',
+  ).trim(),
 };
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
@@ -59,7 +63,9 @@ let socket;
 let currentQr = null;
 let connectionStatus = 'starting';
 let reconnectTimer;
-let state = { chats: {} };
+let state = { chats: {}, crmOutbox: {} };
+let stateSaveQueue = Promise.resolve();
+let crmFlushRunning = false;
 const processedMessages = new Set();
 const registeredJids = new Map();
 const sentMessages = new Map();
@@ -76,6 +82,8 @@ class ChatwootRequestError extends Error {
 async function loadState() {
   try {
     state = JSON.parse(await fs.readFile(config.stateFile, 'utf8'));
+    state.chats ||= {};
+    state.crmOutbox ||= {};
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     await saveState();
@@ -83,10 +91,14 @@ async function loadState() {
 }
 
 async function saveState() {
-  await fs.mkdir(path.dirname(config.stateFile), { recursive: true });
-  const temporary = `${config.stateFile}.tmp`;
-  await fs.writeFile(temporary, JSON.stringify(state, null, 2));
-  await fs.rename(temporary, config.stateFile);
+  const write = async () => {
+    await fs.mkdir(path.dirname(config.stateFile), { recursive: true });
+    const temporary = `${config.stateFile}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify(state, null, 2));
+    await fs.rename(temporary, config.stateFile);
+  };
+  stateSaveQueue = stateSaveQueue.then(write, write);
+  return stateSaveQueue;
 }
 
 async function chatwootRequest(endpoint, options = {}) {
@@ -522,6 +534,133 @@ function qualificationSummary(answers) {
     .join(' | ');
 }
 
+function energiaCrmConfigured() {
+  return Boolean(
+    config.energiaCrmUrl &&
+      config.energiaCrmIntegrationToken.length >= 32,
+  );
+}
+
+function buildEnergiaCrmPayload(chat) {
+  const answers = chat.bot.answers;
+  const phone = phoneFromJid(chat.outboundJid || '');
+  return {
+    version: 1,
+    eventId: `chatwoot:${config.chatwootAccountId}:conversation:${chat.conversationId}`,
+    chatwoot: {
+      accountId: Number(config.chatwootAccountId),
+      contactId: Number(chat.contactId),
+      conversationId: Number(chat.conversationId),
+    },
+    contact: {
+      name: answers.contactName,
+      company: answers.companyName,
+      phone,
+      document: String(answers.cnpj || '').replace(/\D/g, ''),
+      city: answers.city,
+    },
+    lead: {
+      product: answers.productName,
+      monthlyBill: answers.energyValue,
+      summary: qualificationSummary(answers),
+    },
+  };
+}
+
+async function enqueueEnergiaCrmSync(chat) {
+  if (chat.bot.answers.productKey !== 'energy') return;
+  const payload = buildEnergiaCrmPayload(chat);
+  state.crmOutbox[payload.eventId] = {
+    payload,
+    attempts: 0,
+    nextAttemptAt: Date.now(),
+    createdAt: new Date().toISOString(),
+  };
+  chat.crmSync = {
+    status: energiaCrmConfigured() ? 'pending' : 'not_configured',
+    eventId: payload.eventId,
+    updatedAt: new Date().toISOString(),
+  };
+  await saveState();
+  if (energiaCrmConfigured()) void flushEnergiaCrmOutbox();
+}
+
+async function sendEnergiaCrmLead(payload) {
+  const response = await fetch(
+    `${config.energiaCrmUrl}/api/integrations/chatwoot/leads`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.energiaCrmIntegrationToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
+    },
+  );
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`EnergiaVolt ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return body ? JSON.parse(body) : {};
+}
+
+async function flushEnergiaCrmOutbox() {
+  if (crmFlushRunning || !energiaCrmConfigured()) return;
+  crmFlushRunning = true;
+  try {
+    const dueEntries = Object.entries(state.crmOutbox)
+      .filter(([, job]) => Number(job.nextAttemptAt || 0) <= Date.now())
+      .slice(0, 20);
+    for (const [eventId, job] of dueEntries) {
+      try {
+        const result = await sendEnergiaCrmLead(job.payload);
+        const chat = Object.values(state.chats).find(
+          (item) =>
+            Number(item.conversationId) ===
+            Number(job.payload.chatwoot.conversationId),
+        );
+        if (chat) {
+          chat.crmSync = {
+            status: 'synced',
+            eventId,
+            clienteId: result.clienteId || null,
+            oportunidadeId: result.oportunidadeId || null,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        delete state.crmOutbox[eventId];
+        await saveState();
+        logger.info(
+          {
+            conversationId: job.payload.chatwoot.conversationId,
+            oportunidadeId: result.oportunidadeId,
+          },
+          'Lead sincronizado com o EnergiaVolt',
+        );
+      } catch (error) {
+        job.attempts = Number(job.attempts || 0) + 1;
+        const delayMs = Math.min(60 * 60 * 1000, 15000 * 2 ** (job.attempts - 1));
+        job.nextAttemptAt = Date.now() + delayMs;
+        job.lastError = String(error.message || error).slice(0, 500);
+        job.updatedAt = new Date().toISOString();
+        await saveState();
+        logger.warn(
+          {
+            conversationId: job.payload.chatwoot.conversationId,
+            attempts: job.attempts,
+            delayMs,
+            error: job.lastError,
+          },
+          'EnergiaVolt indisponível; sincronização será repetida',
+        );
+      }
+    }
+  } finally {
+    crmFlushRunning = false;
+  }
+}
+
 async function finishQualification(chat, jid) {
   const bot = chat.bot;
   const product = PRODUCT_OPTIONS[bot.answers.productKey];
@@ -552,6 +691,7 @@ async function finishQualification(chat, jid) {
   bot.handoff = true;
   bot.completedAt = new Date().toISOString();
   await saveState();
+  await enqueueEnergiaCrmSync(chat);
   await sendBotMessage(
     chat,
     jid,
@@ -1001,6 +1141,33 @@ app.get('/status', (request, response) => {
   });
 });
 
+app.get('/crm-sync/status', (request, response) => {
+  if (!authorized(request)) return response.status(401).json({ error: 'Não autorizado' });
+  const jobs = Object.values(state.crmOutbox || {});
+  return response.json({
+    configured: energiaCrmConfigured(),
+    pending: jobs.length,
+    jobs: jobs.slice(0, 20).map((job) => ({
+      conversationId: job.payload?.chatwoot?.conversationId,
+      attempts: Number(job.attempts || 0),
+      nextAttemptAt: job.nextAttemptAt
+        ? new Date(job.nextAttemptAt).toISOString()
+        : null,
+      lastError: job.lastError || null,
+    })),
+  });
+});
+
+app.post('/crm-sync/retry', async (request, response) => {
+  if (!authorized(request)) return response.status(401).json({ error: 'Não autorizado' });
+  for (const job of Object.values(state.crmOutbox || {})) {
+    job.nextAttemptAt = Date.now();
+  }
+  await saveState();
+  void flushEnergiaCrmOutbox();
+  return response.json({ accepted: true, pending: Object.keys(state.crmOutbox).length });
+});
+
 app.get('/qr.png', async (request, response, next) => {
   try {
     if (!authorized(request)) return response.status(401).json({ error: 'Não autorizado' });
@@ -1086,6 +1253,20 @@ await loadState();
 app.listen(config.port, '0.0.0.0', () => {
   logger.info({ port: config.port }, 'Gateway Baileys iniciado');
 });
+const crmSyncTimer = setInterval(() => {
+  void flushEnergiaCrmOutbox();
+}, 30000);
+crmSyncTimer.unref();
+if (Object.keys(state.crmOutbox).length > 0) {
+  if (energiaCrmConfigured()) {
+    void flushEnergiaCrmOutbox();
+  } else {
+    logger.warn(
+      { pending: Object.keys(state.crmOutbox).length },
+      'Há leads de Energia pendentes, mas a integração com o CRM não está configurada',
+    );
+  }
+}
 startWhatsApp().catch((error) => {
   connectionStatus = 'error';
   logger.fatal({ err: error }, 'Não foi possível iniciar o Baileys');
