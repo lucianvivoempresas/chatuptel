@@ -44,6 +44,14 @@ let reconnectTimer;
 let state = { chats: {} };
 const processedMessages = new Set();
 
+class ChatwootRequestError extends Error {
+  constructor(status, body) {
+    super(`Chatwoot ${status}: ${body.slice(0, 500)}`);
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function loadState() {
   try {
     state = JSON.parse(await fs.readFile(config.stateFile, 'utf8'));
@@ -73,7 +81,7 @@ async function chatwootRequest(endpoint, options = {}) {
   });
   const body = await response.text();
   if (!response.ok) {
-    throw new Error(`Chatwoot ${response.status}: ${body.slice(0, 500)}`);
+    throw new ChatwootRequestError(response.status, body);
   }
   return body ? JSON.parse(body) : {};
 }
@@ -83,30 +91,103 @@ function phoneFromJid(jid) {
   return number ? `+${number}` : null;
 }
 
-async function ensureConversation(jid, pushName, phoneJid = jid) {
-  if (state.chats[jid]?.conversationId) return state.chats[jid];
+function contactFromResponse(response) {
+  const payload = response?.payload;
+  if (Array.isArray(payload)) return payload[0] || null;
+  return payload || response || null;
+}
 
-  const phoneNumber = phoneFromJid(phoneJid);
-  const contactResponse = await chatwootRequest(
-    `/api/v1/accounts/${config.chatwootAccountId}/contacts`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        inbox_id: config.chatwootInboxId,
-        name: pushName || phoneNumber || jid,
-        phone_number: phoneNumber,
-        identifier: `whatsapp:${jid}`,
-        additional_attributes: { whatsapp_jid: jid, provider: 'baileys' },
-      }),
-    },
+async function searchContact(query, identifier, phoneNumber) {
+  if (!query) return null;
+  const response = await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/contacts/search?q=${encodeURIComponent(query)}`,
   );
+  const contacts = Array.isArray(response.payload) ? response.payload : [];
+  return (
+    contacts.find((contact) => contact.identifier === identifier) ||
+    contacts.find((contact) => contact.phone_number === phoneNumber) ||
+    null
+  );
+}
 
-  const contact = contactResponse.payload?.[0] || contactResponse.payload || contactResponse;
-  const contactId = contact.id || contactResponse.id;
-  const contactInbox = contact.contact_inboxes?.find(
+async function findExistingContact(identifier, phoneNumber) {
+  return (
+    (await searchContact(identifier, identifier, phoneNumber)) ||
+    (await searchContact(phoneNumber, identifier, phoneNumber))
+  );
+}
+
+async function ensureContactInbox(contact, preferredSourceId) {
+  let contactInbox = contact.contact_inboxes?.find(
     (item) => Number(item.inbox?.id) === config.chatwootInboxId,
   );
-  const sourceId = contactInbox?.source_id || jid;
+  if (contactInbox) return contactInbox;
+
+  try {
+    contactInbox = await chatwootRequest(
+      `/api/v1/accounts/${config.chatwootAccountId}/contacts/${contact.id}/contact_inboxes`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          inbox_id: config.chatwootInboxId,
+          source_id: preferredSourceId,
+        }),
+      },
+    );
+    return contactInbox;
+  } catch (error) {
+    if (!(error instanceof ChatwootRequestError) || error.status !== 422) throw error;
+    const refreshed = contactFromResponse(
+      await chatwootRequest(
+        `/api/v1/accounts/${config.chatwootAccountId}/contacts/${contact.id}`,
+      ),
+    );
+    contactInbox = refreshed?.contact_inboxes?.find(
+      (item) => Number(item.inbox?.id) === config.chatwootInboxId,
+    );
+    if (!contactInbox) throw error;
+    return contactInbox;
+  }
+}
+
+async function ensureConversation(jid, pushName, phoneJid = jid) {
+  if (
+    state.chats[jid]?.conversationId &&
+    Number(state.chats[jid].inboxId) === config.chatwootInboxId
+  ) {
+    return state.chats[jid];
+  }
+
+  const phoneNumber = phoneFromJid(phoneJid);
+  const identifier = `whatsapp:${phoneNumber?.replace(/\D/g, '') || jid}`;
+  let contact = await findExistingContact(identifier, phoneNumber);
+
+  if (!contact) {
+    try {
+      const contactResponse = await chatwootRequest(
+        `/api/v1/accounts/${config.chatwootAccountId}/contacts`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            inbox_id: config.chatwootInboxId,
+            name: pushName || phoneNumber || jid,
+            phone_number: phoneNumber,
+            identifier,
+            additional_attributes: { whatsapp_jid: jid, provider: 'baileys' },
+          }),
+        },
+      );
+      contact = contactFromResponse(contactResponse);
+    } catch (error) {
+      if (!(error instanceof ChatwootRequestError) || error.status !== 422) throw error;
+      contact = await findExistingContact(identifier, phoneNumber);
+      if (!contact) throw error;
+    }
+  }
+
+  const contactId = contact.id;
+  const contactInbox = await ensureContactInbox(contact, identifier);
+  const sourceId = contactInbox.source_id;
 
   const conversation = await chatwootRequest(
     `/api/v1/accounts/${config.chatwootAccountId}/conversations`,
@@ -126,6 +207,7 @@ async function ensureConversation(jid, pushName, phoneJid = jid) {
     contactId,
     sourceId,
     conversationId: conversation.id,
+    inboxId: config.chatwootInboxId,
   };
   await saveState();
   return state.chats[jid];
@@ -224,8 +306,16 @@ async function handleIncoming(message) {
 
   const phoneJid =
     message.key.remoteJidAlt?.endsWith('@s.whatsapp.net') ? message.key.remoteJidAlt : jid;
-  const chat = await ensureConversation(jid, message.pushName, phoneJid);
-  await createIncomingMessage(chat.conversationId, message, extractText(message));
+  let chat = await ensureConversation(jid, message.pushName, phoneJid);
+  try {
+    await createIncomingMessage(chat.conversationId, message, extractText(message));
+  } catch (error) {
+    if (!(error instanceof ChatwootRequestError) || error.status !== 404) throw error;
+    delete state.chats[jid];
+    await saveState();
+    chat = await ensureConversation(jid, message.pushName, phoneJid);
+    await createIncomingMessage(chat.conversationId, message, extractText(message));
+  }
   logger.info({ jid, conversationId: chat.conversationId }, 'Mensagem recebida no Chatwoot');
 }
 
