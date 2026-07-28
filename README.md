@@ -51,10 +51,8 @@ openssl rand -hex 32
 ## Configuração do Chatwoot
 
 1. Entre em `https://chat.voltconect.com.br`.
-2. Crie uma caixa de entrada do tipo **API** chamada `WhatsApp Volt Conect`.
-3. Em **Perfil**, copie o token de acesso da API.
-4. Copie o ID da conta na URL (`/app/accounts/ID/...`) e o ID da caixa.
-5. Preencha no `.env`:
+2. Copie o ID da conta na URL (`/app/accounts/ID/...`).
+3. Preencha no `.env`:
 
 ```dotenv
 CHATWOOT_ACCOUNT_ID=1
@@ -63,20 +61,17 @@ CHATWOOT_API_TOKEN=valor-secreto
 BAILEYS_ADMIN_TOKEN=outro-segredo-gerado-com-openssl
 ```
 
-6. Reinicie o gateway:
+4. Execute o instalador. Ele cria ou reutiliza automaticamente uma caixa do tipo
+   **API** chamada `WhatsApp Volt Conect`, adiciona os usuários da conta, gera
+   um token válido e grava o ID correto no `.env`:
 
 ```bash
-docker compose up -d --build baileys
+./deploy/migrate-to-baileys.sh
 ```
 
-7. Na caixa API, crie um webhook para o evento `message_created`. A URL é:
-
-```text
-http://baileys:3001/webhooks/chatwoot?token=VALOR_DE_BAILEYS_ADMIN_TOKEN
-```
-
-Essa URL funciona apenas dentro da rede Docker e não deve ser publicada no
-Nginx.
+O cartão WhatsApp nativo do Chatwoot é exclusivo da API oficial da Meta. Ele
+continuará desativado ao usar Baileys; a conexão aparecerá como a caixa API
+`WhatsApp Volt Conect`.
 
 ## Conectar o WhatsApp
 
