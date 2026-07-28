@@ -273,10 +273,14 @@ async function sendAttachment(jid, attachment, caption) {
 }
 
 async function handleChatwootWebhook(payload) {
+  const payloadInboxId = Number(
+    payload.inbox?.id || payload.conversation?.inbox_id || payload.inbox_id || 0,
+  );
   if (
     payload.event !== 'message_created' ||
     payload.message_type !== 'outgoing' ||
-    payload.private === true
+    payload.private === true ||
+    (payloadInboxId > 0 && payloadInboxId !== config.chatwootInboxId)
   ) {
     return { ignored: true };
   }
