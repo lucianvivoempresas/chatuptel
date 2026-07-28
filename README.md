@@ -108,7 +108,25 @@ sh ./scripts/create-agent.sh "Nome do agente" "agente@voltconect.com.br"
 ```
 
 A senha é solicitada no terminal e não aparece na tela nem no histórico do
-shell. Cada pessoa deve receber um usuário individual.
+shell. O papel padrão é `agent`. Para criar outro administrador, acrescente
+`administrator` ao final do comando:
+
+```bash
+sh ./scripts/create-agent.sh "Nome do gestor" "gestor@voltconect.com.br" administrator
+```
+
+Cada pessoa deve receber um usuário individual. Depois de cadastrar a equipe,
+ative a distribuição automática e a conversa única por contato:
+
+```bash
+sh ./scripts/configure-team.sh
+```
+
+O rodízio considera os agentes que estiverem com disponibilidade **Online**.
+A atribuição deixa um responsável claro para cada conversa. Na Community
+Edition, outro membro da mesma caixa ainda pode abrir e responder a conversa;
+por isso, a transferência deve ser feita antes de outro agente assumir o
+atendimento.
 
 ## Conectar o WhatsApp
 

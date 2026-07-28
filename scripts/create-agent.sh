@@ -9,13 +9,19 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-if [ "$#" -ne 2 ]; then
-  echo "Uso: sh ./scripts/create-agent.sh \"Nome do agente\" \"email@empresa.com\"" >&2
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+  echo "Uso: sh ./scripts/create-agent.sh \"Nome\" \"email@empresa.com\" [agent|administrator]" >&2
   exit 1
 fi
 
 AGENT_NAME=$1
 AGENT_EMAIL=$2
+AGENT_ROLE=${3:-agent}
+
+if [ "$AGENT_ROLE" != "agent" ] && [ "$AGENT_ROLE" != "administrator" ]; then
+  echo "Erro: o papel deve ser agent ou administrator." >&2
+  exit 1
+fi
 CHATWOOT_ACCOUNT_ID=$(sed -n 's/^CHATWOOT_ACCOUNT_ID=//p' .env | tail -n 1 | sed 's/^"//;s/"$//')
 CHATWOOT_INBOX_ID=$(sed -n 's/^CHATWOOT_INBOX_ID=//p' .env | tail -n 1 | sed 's/^"//;s/"$//')
 
@@ -50,12 +56,13 @@ if [ -z "$AGENT_PASSWORD" ]; then
   exit 1
 fi
 
-export AGENT_NAME AGENT_EMAIL AGENT_PASSWORD CHATWOOT_ACCOUNT_ID CHATWOOT_INBOX_ID
+export AGENT_NAME AGENT_EMAIL AGENT_PASSWORD AGENT_ROLE CHATWOOT_ACCOUNT_ID CHATWOOT_INBOX_ID
 
 docker compose exec -T \
   -e AGENT_NAME="$AGENT_NAME" \
   -e AGENT_EMAIL="$AGENT_EMAIL" \
   -e AGENT_PASSWORD="$AGENT_PASSWORD" \
+  -e AGENT_ROLE="$AGENT_ROLE" \
   -e CHATWOOT_ACCOUNT_ID="$CHATWOOT_ACCOUNT_ID" \
   -e CHATWOOT_INBOX_ID="$CHATWOOT_INBOX_ID" \
   rails bundle exec rails runner '
@@ -73,7 +80,7 @@ ActiveRecord::Base.transaction do
   user.save!
 
   membership = AccountUser.find_or_initialize_by(account: account, user: user)
-  membership.role = :agent
+  membership.role = ENV.fetch("AGENT_ROLE", "agent")
   membership.availability = :offline
   membership.auto_offline = true
   membership.save!
