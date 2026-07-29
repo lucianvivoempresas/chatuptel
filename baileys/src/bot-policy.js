@@ -7,15 +7,28 @@ function isHumanSender(message) {
   return senderType === 'user';
 }
 
-export function hasHumanAgentMessage(messages) {
+export function isBotAuthoredMessage(message, botUserId = 0) {
+  const attributes = message?.content_attributes || {};
+  const senderType = String(message?.sender?.type || '').toLowerCase();
+  const senderName = String(message?.sender?.name || '').trim().toLowerCase();
+  const senderId = Number(message?.sender?.id || message?.user?.id || 0);
+  return (
+    attributes.baileys_bot === true ||
+    attributes.bot_name === 'Assistente Uptel Conecta' ||
+    senderType === 'agentbot' ||
+    senderName === 'assistente uptel conecta' ||
+    (Number(botUserId) > 0 && senderId === Number(botUserId))
+  );
+}
+
+export function hasHumanAgentMessage(messages, botUserId = 0) {
   return (Array.isArray(messages) ? messages : []).some((message) => {
-    const attributes = message?.content_attributes || {};
     return (
       isOutgoingMessage(message) &&
       message?.private !== true &&
       isHumanSender(message) &&
-      attributes.baileys_bot !== true &&
-      attributes.baileys_history_import !== true
+      !isBotAuthoredMessage(message, botUserId) &&
+      message?.content_attributes?.baileys_history_import !== true
     );
   });
 }

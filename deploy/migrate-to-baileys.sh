@@ -93,8 +93,22 @@ default_features =
   end
 account.enable_features!(*default_features)
 
-account_user = account.account_users.find_by!(role: :administrator)
-access_token = account_user.user.access_token || AccessToken.create!(owner: account_user.user)
+bot_user = User.find_or_initialize_by(email: "assistente-chat@voltconect.com.br")
+bot_user.name = "Assistente Uptel Conecta"
+if bot_user.new_record?
+  password = SecureRandom.hex(32)
+  bot_user.password = password
+  bot_user.password_confirmation = password
+end
+bot_user.skip_confirmation!
+bot_user.skip_confirmation_notification!
+bot_user.save!
+bot_membership = AccountUser.find_or_initialize_by(account: account, user: bot_user)
+bot_membership.role = :agent
+bot_membership.availability = :offline
+bot_membership.auto_offline = true
+bot_membership.save!
+access_token = bot_user.access_token || AccessToken.create!(owner: bot_user)
 webhook_url = "http://baileys:3001/webhooks/chatwoot?token=#{ENV.fetch("BAILEYS_ADMIN_TOKEN")}"
 
 requested_inbox_id = ENV.fetch("CHATWOOT_INBOX_ID", "").to_i
@@ -126,10 +140,12 @@ puts "Webhook do Chatwoot configurado automaticamente."
 puts "Caixa API #{inbox.name} configurada com ID #{inbox.id}."
 puts "CHATWOOT_TOKEN=#{access_token.token}"
 puts "CHATWOOT_INBOX=#{inbox.id}"
+puts "CHATWOOT_BOT_USER=#{bot_user.id}"
 ')
 
 new_chatwoot_token=$(printf '%s\n' "$configure_output" | sed -n 's/^CHATWOOT_TOKEN=//p' | tail -n 1)
 new_chatwoot_inbox_id=$(printf '%s\n' "$configure_output" | sed -n 's/^CHATWOOT_INBOX=//p' | tail -n 1)
+new_chatwoot_bot_user_id=$(printf '%s\n' "$configure_output" | sed -n 's/^CHATWOOT_BOT_USER=//p' | tail -n 1)
 if [ -z "$new_chatwoot_token" ]; then
   echo "Não foi possível obter um token válido do Chatwoot." >&2
   exit 1
@@ -138,10 +154,14 @@ if [ -z "$new_chatwoot_inbox_id" ]; then
   echo "Não foi possível criar ou localizar a caixa API do Chatwoot." >&2
   exit 1
 fi
+if [ -z "$new_chatwoot_bot_user_id" ]; then
+  echo "Não foi possível criar a identidade técnica do Assistente." >&2
+  exit 1
+fi
 
 env_file_tmp="${PROJECT_DIR}/.env.baileys.tmp"
-awk -v token="$new_chatwoot_token" -v inbox_id="$new_chatwoot_inbox_id" '
-  BEGIN { token_replaced = 0; inbox_replaced = 0 }
+awk -v token="$new_chatwoot_token" -v inbox_id="$new_chatwoot_inbox_id" -v bot_user_id="$new_chatwoot_bot_user_id" '
+  BEGIN { token_replaced = 0; inbox_replaced = 0; bot_user_replaced = 0 }
   /^CHATWOOT_API_TOKEN=/ {
     print "CHATWOOT_API_TOKEN=" token
     token_replaced = 1
@@ -152,19 +172,26 @@ awk -v token="$new_chatwoot_token" -v inbox_id="$new_chatwoot_inbox_id" '
     inbox_replaced = 1
     next
   }
+  /^CHATWOOT_BOT_USER_ID=/ {
+    print "CHATWOOT_BOT_USER_ID=" bot_user_id
+    bot_user_replaced = 1
+    next
+  }
   { print }
   END {
     if (!token_replaced) print "CHATWOOT_API_TOKEN=" token
     if (!inbox_replaced) print "CHATWOOT_INBOX_ID=" inbox_id
+    if (!bot_user_replaced) print "CHATWOOT_BOT_USER_ID=" bot_user_id
   }
 ' .env > "$env_file_tmp"
 mv "$env_file_tmp" .env
 chmod 600 .env
 CHATWOOT_API_TOKEN="$new_chatwoot_token"
 CHATWOOT_INBOX_ID="$new_chatwoot_inbox_id"
-export CHATWOOT_API_TOKEN CHATWOOT_INBOX_ID
+CHATWOOT_BOT_USER_ID="$new_chatwoot_bot_user_id"
+export CHATWOOT_API_TOKEN CHATWOOT_INBOX_ID CHATWOOT_BOT_USER_ID
 
-printf '%s\n' "$configure_output" | sed '/^CHATWOOT_TOKEN=/d; /^CHATWOOT_INBOX=/d'
+printf '%s\n' "$configure_output" | sed '/^CHATWOOT_TOKEN=/d; /^CHATWOOT_INBOX=/d; /^CHATWOOT_BOT_USER=/d'
 
 docker compose up -d --force-recreate baileys
 

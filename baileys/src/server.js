@@ -18,6 +18,7 @@ import QRCode from 'qrcode';
 import qrcodeTerminal from 'qrcode-terminal';
 import {
   hasHumanAgentMessage,
+  isBotAuthoredMessage,
   markHumanManaged,
   suppressQualificationBot,
 } from './bot-policy.js';
@@ -48,6 +49,7 @@ const config = {
   chatwootAccountId: required('CHATWOOT_ACCOUNT_ID'),
   chatwootInboxId: Number(required('CHATWOOT_INBOX_ID')),
   chatwootApiToken: required('CHATWOOT_API_TOKEN'),
+  chatwootBotUserId: Math.max(0, Number(process.env.CHATWOOT_BOT_USER_ID || 0)),
   defaultCountryCode: (process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '55').replace(/\D/g, ''),
   prefixAgentName: !['false', '0', 'no'].includes(
     String(process.env.WHATSAPP_PREFIX_AGENT_NAME || 'true').toLowerCase(),
@@ -646,7 +648,7 @@ async function conversationHasHumanAgentMessage(conversationId) {
     `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`,
   );
   const messages = Array.isArray(response) ? response : response.payload || [];
-  return hasHumanAgentMessage(messages);
+  return hasHumanAgentMessage(messages, config.chatwootBotUserId);
 }
 
 async function disableBotForHumanConversation(chat) {
@@ -1523,7 +1525,7 @@ async function handleChatwootWebhook(payload) {
     payload.event !== 'message_created' ||
     payload.message_type !== 'outgoing' ||
     payload.private === true ||
-    payload.content_attributes?.baileys_bot === true ||
+    isBotAuthoredMessage(payload, config.chatwootBotUserId) ||
     payload.content_attributes?.baileys_history_import === true ||
     (payloadInboxId > 0 && payloadInboxId !== config.chatwootInboxId)
   ) {

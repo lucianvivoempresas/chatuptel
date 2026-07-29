@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   hasHumanAgentMessage,
+  isBotAuthoredMessage,
   markHumanManaged,
   suppressQualificationBot,
 } from '../src/bot-policy.js';
@@ -14,6 +15,23 @@ markHumanManaged(chat, '2026-07-29T12:00:00.000Z');
 assert.equal(chat.humanManaged, true);
 assert.equal(chat.bot.handoff, true);
 assert.equal(chat.bot.stage, 'human');
+assert.equal(
+  isBotAuthoredMessage({
+    sender: { id: 22, type: 'User', name: 'Assistente Uptel Conecta' },
+    content_attributes: {},
+  }),
+  true,
+);
+assert.equal(
+  isBotAuthoredMessage(
+    {
+      sender: { id: 22, type: 'User', name: 'Outro nome' },
+      content_attributes: {},
+    },
+    22,
+  ),
+  true,
+);
 
 assert.equal(
   hasHumanAgentMessage([

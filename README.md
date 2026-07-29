@@ -190,6 +190,22 @@ conversa, o bot permanece desativado nela.
 
 O fluxo e o roteiro de teste estão em `docs/chatbot-qualification.md`.
 
+### Identidade própria do Assistente
+
+O gateway deve usar um usuário técnico separado para que mensagens automáticas
+não apareçam no Chatwoot com o nome do administrador que forneceu o token
+original. Configure uma única vez:
+
+```bash
+chmod +x scripts/configure-bot-user.sh
+./scripts/configure-bot-user.sh
+```
+
+O script cria o agente técnico `Assistente Uptel Conecta`, mantém esse usuário
+offline, associa-o somente à caixa do WhatsApp e troca o token do gateway sem
+exibi-lo no terminal. Mensagens desse usuário nunca contam como intervenção
+humana para a política do chatbot.
+
 ## Integração com o CRM EnergiaVolt
 
 Leads qualificados como Energia são enviados por uma fila persistente para o
