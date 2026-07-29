@@ -18,7 +18,6 @@ import QRCode from 'qrcode';
 import qrcodeTerminal from 'qrcode-terminal';
 import {
   hasHumanAgentMessage,
-  isBotAuthoredMessage,
   markHumanManaged,
   suppressQualificationBot,
 } from './bot-policy.js';
@@ -1525,7 +1524,7 @@ async function handleChatwootWebhook(payload) {
     payload.event !== 'message_created' ||
     payload.message_type !== 'outgoing' ||
     payload.private === true ||
-    isBotAuthoredMessage(payload, config.chatwootBotUserId) ||
+    payload.content_attributes?.baileys_bot === true ||
     payload.content_attributes?.baileys_history_import === true ||
     (payloadInboxId > 0 && payloadInboxId !== config.chatwootInboxId)
   ) {
