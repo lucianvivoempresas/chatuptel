@@ -96,7 +96,7 @@ account.enable_features!(*default_features)
 bot_user = User.find_or_initialize_by(email: "assistente-chat@voltconect.com.br")
 bot_user.name = "Assistente Uptel Conecta"
 if bot_user.new_record?
-  password = SecureRandom.hex(32)
+  password = "Aa1!#{SecureRandom.hex(28)}"
   bot_user.password = password
   bot_user.password_confirmation = password
 end

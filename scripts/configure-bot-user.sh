@@ -33,7 +33,7 @@ ActiveRecord::Base.transaction do
   user = User.find_or_initialize_by(email: email)
   user.name = "Assistente Uptel Conecta"
   if user.new_record?
-    password = SecureRandom.hex(32)
+    password = "Aa1!#{SecureRandom.hex(28)}"
     user.password = password
     user.password_confirmation = password
   end
