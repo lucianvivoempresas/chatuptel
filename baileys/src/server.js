@@ -18,6 +18,9 @@ import QRCode from 'qrcode';
 import qrcodeTerminal from 'qrcode-terminal';
 import {
   hasHumanAgentMessage,
+  hasPersistentHumanMarker,
+  humanAgentIdFromMessage,
+  isOutgoingMessage,
   markHumanManaged,
   suppressQualificationBot,
 } from './bot-policy.js';
@@ -633,6 +636,16 @@ async function assignConversationTeam(conversationId, teamName) {
   );
 }
 
+async function assignConversationAgent(conversationId, agentId) {
+  await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/assignments`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ assignee_id: agentId }),
+    },
+  );
+}
+
 function newBotState() {
   return {
     stage: 'product',
@@ -650,6 +663,14 @@ async function conversationHasHumanAgentMessage(conversationId) {
   return hasHumanAgentMessage(messages, config.chatwootBotUserId);
 }
 
+async function conversationHasPersistentHumanMarker(conversationId) {
+  const response = await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}`,
+  );
+  const conversation = response?.payload || response;
+  return hasPersistentHumanMarker(conversation);
+}
+
 async function disableBotForHumanConversation(chat) {
   markHumanManaged(chat);
   await saveState();
@@ -661,15 +682,15 @@ async function disableBotForHumanConversation(chat) {
 
 async function humanAlreadyParticipated(chat) {
   if (suppressQualificationBot(chat)) return true;
-  if (chat.humanParticipationChecked === true) return false;
 
   try {
-    if (await conversationHasHumanAgentMessage(chat.conversationId)) {
+    if (
+      (await conversationHasPersistentHumanMarker(chat.conversationId)) ||
+      (await conversationHasHumanAgentMessage(chat.conversationId))
+    ) {
       await disableBotForHumanConversation(chat);
       return true;
     }
-    chat.humanParticipationChecked = true;
-    await saveState();
   } catch (error) {
     logger.warn(
       { conversationId: chat.conversationId, error: error.message },
@@ -1522,7 +1543,7 @@ async function handleChatwootWebhook(payload) {
   );
   if (
     payload.event !== 'message_created' ||
-    payload.message_type !== 'outgoing' ||
+    !isOutgoingMessage(payload) ||
     payload.private === true ||
     payload.content_attributes?.baileys_bot === true ||
     payload.content_attributes?.baileys_history_import === true ||
@@ -1534,6 +1555,8 @@ async function handleChatwootWebhook(payload) {
   if (!jid) throw new Error('Não foi possível identificar o destinatário');
 
   const conversationId = Number(payload.conversation?.id || payload.conversation_id);
+  const agentId = humanAgentIdFromMessage(payload, config.chatwootBotUserId);
+  const agentName = agentNameFromPayload(payload);
   const normalizedJid = phoneJidFromValue(jid);
   const relatedEntries = Object.entries(state.chats).filter(
     ([, chat]) =>
@@ -1567,7 +1590,31 @@ async function handleChatwootWebhook(payload) {
     'Chatbot desativado pela participaÃ§Ã£o de agente',
   );
 
-  const agentName = agentNameFromPayload(payload);
+  if (agentId) {
+    const ownershipResults = await Promise.allSettled([
+      assignConversationAgent(conversationId, agentId),
+      mergeConversationAttributes(conversationId, {
+        atendimento_humano_ativo: true,
+        agente_responsavel_id: agentId,
+        agente_responsavel_nome: agentName || `Agente ${agentId}`,
+      }),
+    ]);
+    const ownershipErrors = ownershipResults
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason?.message || String(result.reason));
+    if (ownershipErrors.length) {
+      logger.warn(
+        { conversationId, agentId, errors: ownershipErrors },
+        'Mensagem serÃ¡ enviada, mas a atribuiÃ§Ã£o automÃ¡tica ficou incompleta',
+      );
+    } else {
+      logger.info(
+        { conversationId, agentId, agentName },
+        'Conversa atribuÃ­da automaticamente ao agente que iniciou ou respondeu',
+      );
+    }
+  }
+
   const formattedContent = formatAgentMessage(
     payload.content,
     payload,

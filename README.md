@@ -186,7 +186,8 @@ empresa, produto, CNPJ, cidade/UF e as informações específicas da oportunidad
 preenche o contato e a conversa, aplica a etiqueta do produto e encaminha para
 Vendas, Energia ou Pós-venda. Conversas iniciadas por um agente não exibem o
 menu quando o cliente responde. Depois que qualquer agente participa de uma
-conversa, o bot permanece desativado nela.
+conversa, ela é atribuída automaticamente a esse agente e o bot permanece
+desativado nela, inclusive após reinicializações do gateway.
 
 O fluxo e o roteiro de teste estão em `docs/chatbot-qualification.md`.
 

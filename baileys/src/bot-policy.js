@@ -1,4 +1,4 @@
-function isOutgoingMessage(message) {
+export function isOutgoingMessage(message) {
   return message?.message_type === 'outgoing' || Number(message?.message_type) === 1;
 }
 
@@ -31,6 +31,28 @@ export function hasHumanAgentMessage(messages, botUserId = 0) {
       message?.content_attributes?.baileys_history_import !== true
     );
   });
+}
+
+export function humanAgentIdFromMessage(message, botUserId = 0) {
+  if (
+    !isOutgoingMessage(message) ||
+    message?.private === true ||
+    !isHumanSender(message) ||
+    isBotAuthoredMessage(message, botUserId) ||
+    message?.content_attributes?.baileys_history_import === true
+  ) {
+    return null;
+  }
+  const senderId = Number(message?.sender?.id || 0);
+  return senderId > 0 ? senderId : null;
+}
+
+export function hasPersistentHumanMarker(conversation) {
+  const attributes = conversation?.custom_attributes || {};
+  return (
+    attributes.atendimento_humano_ativo === true ||
+    String(attributes.atendimento_humano_ativo || '').toLowerCase() === 'true'
+  );
 }
 
 export function suppressQualificationBot(chat) {

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import {
   hasHumanAgentMessage,
+  hasPersistentHumanMarker,
+  humanAgentIdFromMessage,
   isBotAuthoredMessage,
+  isOutgoingMessage,
   markHumanManaged,
   suppressQualificationBot,
 } from '../src/bot-policy.js';
@@ -9,6 +12,34 @@ import {
 assert.equal(suppressQualificationBot({}), false);
 assert.equal(suppressQualificationBot({ humanManaged: true }), true);
 assert.equal(suppressQualificationBot({ bot: { handoff: true } }), true);
+assert.equal(isOutgoingMessage({ message_type: 'outgoing' }), true);
+assert.equal(isOutgoingMessage({ message_type: 1 }), true);
+assert.equal(hasPersistentHumanMarker({ custom_attributes: {} }), false);
+assert.equal(
+  hasPersistentHumanMarker({ custom_attributes: { atendimento_humano_ativo: true } }),
+  true,
+);
+assert.equal(
+  humanAgentIdFromMessage({
+    message_type: 'outgoing',
+    private: false,
+    sender: { id: 7, type: 'User', name: 'Lucian Oliveira' },
+    content_attributes: {},
+  }),
+  7,
+);
+assert.equal(
+  humanAgentIdFromMessage(
+    {
+      message_type: 'outgoing',
+      private: false,
+      sender: { id: 22, type: 'User', name: 'Assistente Uptel Conecta' },
+      content_attributes: {},
+    },
+    22,
+  ),
+  null,
+);
 
 const chat = { bot: { stage: 'name', handoff: false } };
 markHumanManaged(chat, '2026-07-29T12:00:00.000Z');

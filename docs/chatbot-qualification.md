@@ -17,6 +17,8 @@ atendente.
    cliente responder.
 8. A intervenção humana fica gravada no estado do gateway. Depois disso, nem
    mesmo a palavra `menu` reativa o bot nessa conversa.
+9. Quando um agente inicia ou responde uma conversa, ela é automaticamente
+   atribuída a esse agente e recebe a marca persistente de atendimento humano.
 
 Enquanto nenhum agente tiver participado, o contato pode digitar `menu` para
 reiniciar a qualificação e `6` ou `falar com atendente` para solicitar
