@@ -16,6 +16,11 @@ import makeWASocket, {
 import pino from 'pino';
 import QRCode from 'qrcode';
 import qrcodeTerminal from 'qrcode-terminal';
+import {
+  hasHumanAgentMessage,
+  markHumanManaged,
+  suppressQualificationBot,
+} from './bot-policy.js';
 import { agentNameFromPayload, formatAgentMessage } from './message-format.js';
 import {
   MENU_TEXT,
@@ -293,6 +298,19 @@ async function ensureContactInbox(contact, preferredSourceId) {
 async function ensureConversation(jid, pushName, phoneJid = jid, options = {}) {
   const historical = options.historical === true;
   const outboundJid = phoneJidFromValue(phoneJid);
+  const matchingChat = outboundJid
+    ? Object.entries(state.chats).find(
+        ([, chat]) =>
+          Number(chat.inboxId) === config.chatwootInboxId &&
+          phoneJidFromValue(chat.outboundJid || chat.sourceId) === outboundJid,
+      )
+    : null;
+  if (!state.chats[jid]?.conversationId && matchingChat) {
+    const [matchingKey, chat] = matchingChat;
+    state.chats[jid] = chat;
+    if (matchingKey !== jid) delete state.chats[matchingKey];
+    await saveState();
+  }
   if (
     state.chats[jid]?.conversationId &&
     Number(state.chats[jid].inboxId) === config.chatwootInboxId
@@ -609,6 +627,39 @@ function newBotState() {
   };
 }
 
+async function conversationHasHumanAgentMessage(conversationId) {
+  const response = await chatwootRequest(
+    `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`,
+  );
+  const messages = Array.isArray(response) ? response : response.payload || [];
+  return hasHumanAgentMessage(messages);
+}
+
+async function disableBotForHumanConversation(chat) {
+  markHumanManaged(chat);
+  await saveState();
+}
+
+async function humanAlreadyParticipated(chat) {
+  if (suppressQualificationBot(chat)) return true;
+  if (chat.humanParticipationChecked === true) return false;
+
+  try {
+    if (await conversationHasHumanAgentMessage(chat.conversationId)) {
+      await disableBotForHumanConversation(chat);
+      return true;
+    }
+    chat.humanParticipationChecked = true;
+    await saveState();
+  } catch (error) {
+    logger.warn(
+      { conversationId: chat.conversationId, error: error.message },
+      'NÃ£o foi possÃ­vel verificar se um agente jÃ¡ participou da conversa',
+    );
+  }
+  return false;
+}
+
 function qualificationSummary(answers) {
   return [
     answers.contactName && `Contato: ${answers.contactName}`,
@@ -812,6 +863,7 @@ async function handoffToHuman(chat, jid) {
 
 async function processQualificationBot(chat, jid, text) {
   if (!config.botEnabled) return;
+  if (await humanAlreadyParticipated(chat)) return;
 
   if (!chat.bot || isMenuRequest(text)) {
     chat.bot = newBotState();
@@ -1463,15 +1515,26 @@ async function handleChatwootWebhook(payload) {
   if (!jid) throw new Error('Não foi possível identificar o destinatário');
 
   const conversationId = Number(payload.conversation?.id || payload.conversation_id);
-  const mappedChat = Object.values(state.chats).find(
-    (chat) => Number(chat.conversationId) === conversationId,
+  const normalizedJid = phoneJidFromValue(jid);
+  let mappedEntry = Object.entries(state.chats).find(
+    ([, chat]) => Number(chat.conversationId) === conversationId,
   );
-  if (mappedChat?.bot && !mappedChat.bot.handoff) {
-    mappedChat.bot.handoff = true;
-    mappedChat.bot.stage = 'human';
-    mappedChat.bot.handoffAt = new Date().toISOString();
-    await saveState();
+  if (!mappedEntry && normalizedJid) {
+    mappedEntry = Object.entries(state.chats).find(
+      ([, chat]) => phoneJidFromValue(chat.outboundJid || chat.sourceId) === normalizedJid,
+    );
   }
+  const mappedChat = mappedEntry?.[1] || {
+    conversationId,
+    inboxId: config.chatwootInboxId,
+    outboundJid: normalizedJid,
+  };
+  mappedChat.conversationId = conversationId;
+  mappedChat.inboxId = config.chatwootInboxId;
+  if (normalizedJid) mappedChat.outboundJid = normalizedJid;
+  markHumanManaged(mappedChat);
+  if (!mappedEntry) state.chats[normalizedJid || jid] = mappedChat;
+  await saveState();
 
   const agentName = agentNameFromPayload(payload);
   const formattedContent = formatAgentMessage(

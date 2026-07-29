@@ -12,11 +12,15 @@ atendente.
    ou uma descrição da necessidade.
 4. Os dados são gravados nos atributos do contato e da conversa.
 5. A conversa recebe a etiqueta do produto e é atribuída à equipe correta.
-6. O bot para de responder após a transferência ou assim que um agente humano
-   envia uma mensagem.
+6. O bot para de responder assim que um agente humano envia uma mensagem.
+7. Se a conversa foi iniciada por um agente, o menu não é exibido quando o
+   cliente responder.
+8. A intervenção humana fica gravada no estado do gateway. Depois disso, nem
+   mesmo a palavra `menu` reativa o bot nessa conversa.
 
-O contato pode digitar `menu` para reiniciar a qualificação e `6` ou
-`falar com atendente` para solicitar atendimento humano.
+Enquanto nenhum agente tiver participado, o contato pode digitar `menu` para
+reiniciar a qualificação e `6` ou `falar com atendente` para solicitar
+atendimento humano.
 
 ## Dados preenchidos
 

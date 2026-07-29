@@ -184,8 +184,9 @@ O fluxo completo está em `docs/qualification-guide.md`.
 Com `WHATSAPP_BOT_ENABLED=true`, o Assistente Uptel Conecta coleta nome,
 empresa, produto, CNPJ, cidade/UF e as informações específicas da oportunidade. Ao concluir, ele
 preenche o contato e a conversa, aplica a etiqueta do produto e encaminha para
-Vendas, Energia ou Pós-venda. O bot para automaticamente quando um atendente
-humano responde.
+Vendas, Energia ou Pós-venda. Conversas iniciadas por um agente não exibem o
+menu quando o cliente responde. Depois que qualquer agente participa de uma
+conversa, o bot permanece desativado nela.
 
 O fluxo e o roteiro de teste estão em `docs/chatbot-qualification.md`.
 
