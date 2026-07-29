@@ -87,6 +87,7 @@ let state = {
   sendLimits: {},
   historyImported: {},
   historyStats: {},
+  botPolicyVersion: 2,
 };
 let stateSaveQueue = Promise.resolve();
 let auditWriteQueue = Promise.resolve();
@@ -118,6 +119,13 @@ async function loadState() {
     state.sendLimits ||= {};
     state.historyImported ||= {};
     state.historyStats ||= {};
+    if (Number(state.botPolicyVersion || 0) < 2) {
+      for (const chat of Object.values(state.chats)) {
+        delete chat.humanParticipationChecked;
+      }
+      state.botPolicyVersion = 2;
+      await saveState();
+    }
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     await saveState();
