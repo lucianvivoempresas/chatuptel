@@ -298,15 +298,21 @@ async function ensureContactInbox(contact, preferredSourceId) {
 async function ensureConversation(jid, pushName, phoneJid = jid, options = {}) {
   const historical = options.historical === true;
   const outboundJid = phoneJidFromValue(phoneJid);
-  const matchingChat = outboundJid
-    ? Object.entries(state.chats).find(
+  const matchingChats = outboundJid
+    ? Object.entries(state.chats).filter(
         ([, chat]) =>
           Number(chat.inboxId) === config.chatwootInboxId &&
           phoneJidFromValue(chat.outboundJid || chat.sourceId) === outboundJid,
       )
-    : null;
-  if (!state.chats[jid]?.conversationId && matchingChat) {
-    const [matchingKey, chat] = matchingChat;
+    : [];
+  const humanManagedAlias = matchingChats.find(([, chat]) => chat.humanManaged === true);
+  if (state.chats[jid]?.conversationId && humanManagedAlias) {
+    markHumanManaged(state.chats[jid], humanManagedAlias[1].humanManagedAt);
+    state.chats[jid].conversationId = humanManagedAlias[1].conversationId;
+    state.chats[jid].outboundJid = outboundJid;
+    await saveState();
+  } else if (!state.chats[jid]?.conversationId && matchingChats.length) {
+    const [matchingKey, chat] = humanManagedAlias || matchingChats[0];
     state.chats[jid] = chat;
     if (matchingKey !== jid) delete state.chats[matchingKey];
     await saveState();
@@ -638,6 +644,10 @@ async function conversationHasHumanAgentMessage(conversationId) {
 async function disableBotForHumanConversation(chat) {
   markHumanManaged(chat);
   await saveState();
+  logger.info(
+    { conversationId: chat.conversationId },
+    'Chatbot desativado: conversa jÃ¡ possui participaÃ§Ã£o de agente',
+  );
 }
 
 async function humanAlreadyParticipated(chat) {
@@ -1516,25 +1526,37 @@ async function handleChatwootWebhook(payload) {
 
   const conversationId = Number(payload.conversation?.id || payload.conversation_id);
   const normalizedJid = phoneJidFromValue(jid);
-  let mappedEntry = Object.entries(state.chats).find(
-    ([, chat]) => Number(chat.conversationId) === conversationId,
+  const relatedEntries = Object.entries(state.chats).filter(
+    ([, chat]) =>
+      Number(chat.conversationId) === conversationId ||
+      (normalizedJid &&
+        phoneJidFromValue(chat.outboundJid || chat.sourceId) === normalizedJid),
   );
-  if (!mappedEntry && normalizedJid) {
-    mappedEntry = Object.entries(state.chats).find(
-      ([, chat]) => phoneJidFromValue(chat.outboundJid || chat.sourceId) === normalizedJid,
-    );
+  if (relatedEntries.length) {
+    for (const [, chat] of relatedEntries) {
+      chat.conversationId = conversationId;
+      chat.inboxId = config.chatwootInboxId;
+      if (normalizedJid) chat.outboundJid = normalizedJid;
+      markHumanManaged(chat);
+    }
+  } else {
+    const mappedChat = {
+      conversationId,
+      inboxId: config.chatwootInboxId,
+      outboundJid: normalizedJid,
+    };
+    markHumanManaged(mappedChat);
+    state.chats[normalizedJid || jid] = mappedChat;
   }
-  const mappedChat = mappedEntry?.[1] || {
-    conversationId,
-    inboxId: config.chatwootInboxId,
-    outboundJid: normalizedJid,
-  };
-  mappedChat.conversationId = conversationId;
-  mappedChat.inboxId = config.chatwootInboxId;
-  if (normalizedJid) mappedChat.outboundJid = normalizedJid;
-  markHumanManaged(mappedChat);
-  if (!mappedEntry) state.chats[normalizedJid || jid] = mappedChat;
   await saveState();
+  logger.info(
+    {
+      conversationId,
+      jid: normalizedJid || jid,
+      aliasesBlocked: Math.max(1, relatedEntries.length),
+    },
+    'Chatbot desativado pela participaÃ§Ã£o de agente',
+  );
 
   const agentName = agentNameFromPayload(payload);
   const formattedContent = formatAgentMessage(
