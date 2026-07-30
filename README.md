@@ -205,9 +205,11 @@ chmod +x scripts/configure-bot-user.sh
 ```
 
 O script cria o agente técnico `Assistente Uptel Conecta`, mantém esse usuário
-offline, associa-o somente à caixa do WhatsApp e troca o token do gateway sem
-exibi-lo no terminal. Mensagens desse usuário nunca contam como intervenção
-humana para a política do chatbot.
+offline e associa-o somente à caixa do WhatsApp. Ele grava dois tokens distintos
+sem exibi-los no terminal: o token administrativo continua responsável por
+contatos e conversas, enquanto o token técnico serve apenas para registrar as
+mensagens visuais do Assistente. Mensagens desse usuário nunca contam como
+intervenção humana para a política do chatbot.
 
 ## Integração com o CRM EnergiaVolt
 

@@ -48,28 +48,44 @@ ActiveRecord::Base.transaction do
   membership.save!
 
   inbox.add_members([user.id]) unless inbox.members.exists?(user.id)
-  token = user.access_token || AccessToken.create!(owner: user)
+  bot_token = user.access_token || AccessToken.create!(owner: user)
+
+  administrator = account.account_users
+    .where(role: AccountUser.roles[:administrator])
+    .includes(:user)
+    .first
+  raise "A conta não possui um administrador" unless administrator
+
+  admin_token = administrator.user.access_token ||
+    AccessToken.create!(owner: administrator.user)
 
   puts "BOT_USER_ID=#{user.id}"
-  puts "BOT_TOKEN=#{token.token}"
+  puts "BOT_TOKEN=#{bot_token.token}"
+  puts "ADMIN_TOKEN=#{admin_token.token}"
 end
 ')
 
 bot_user_id=$(printf '%s\n' "$configure_output" | sed -n 's/^BOT_USER_ID=//p' | tail -n 1)
 bot_token=$(printf '%s\n' "$configure_output" | sed -n 's/^BOT_TOKEN=//p' | tail -n 1)
+admin_token=$(printf '%s\n' "$configure_output" | sed -n 's/^ADMIN_TOKEN=//p' | tail -n 1)
 
-if [ -z "$bot_user_id" ] || [ -z "$bot_token" ]; then
+if [ -z "$bot_user_id" ] || [ -z "$bot_token" ] || [ -z "$admin_token" ]; then
   echo "Erro: não foi possível criar a identidade técnica do Assistente." >&2
   exit 1
 fi
 
 env_file_tmp=$(mktemp "${PROJECT_DIR}/.env.bot.XXXXXX")
 trap 'rm -f "$env_file_tmp"' EXIT INT TERM
-awk -v token="$bot_token" -v bot_user_id="$bot_user_id" '
-  BEGIN { token_replaced = 0; user_replaced = 0 }
+awk -v admin_token="$admin_token" -v bot_token="$bot_token" -v bot_user_id="$bot_user_id" '
+  BEGIN { admin_replaced = 0; bot_replaced = 0; user_replaced = 0 }
   /^CHATWOOT_API_TOKEN=/ {
-    print "CHATWOOT_API_TOKEN=" token
-    token_replaced = 1
+    print "CHATWOOT_API_TOKEN=" admin_token
+    admin_replaced = 1
+    next
+  }
+  /^CHATWOOT_BOT_API_TOKEN=/ {
+    print "CHATWOOT_BOT_API_TOKEN=" bot_token
+    bot_replaced = 1
     next
   }
   /^CHATWOOT_BOT_USER_ID=/ {
@@ -79,7 +95,8 @@ awk -v token="$bot_token" -v bot_user_id="$bot_user_id" '
   }
   { print }
   END {
-    if (!token_replaced) print "CHATWOOT_API_TOKEN=" token
+    if (!admin_replaced) print "CHATWOOT_API_TOKEN=" admin_token
+    if (!bot_replaced) print "CHATWOOT_BOT_API_TOKEN=" bot_token
     if (!user_replaced) print "CHATWOOT_BOT_USER_ID=" bot_user_id
   }
 ' .env > "$env_file_tmp"
@@ -92,4 +109,4 @@ docker compose up -d --build --force-recreate baileys
 echo "Identidade técnica do Assistente configurada."
 echo "NOME=Assistente Uptel Conecta"
 echo "USUARIO_ID=${bot_user_id}"
-echo "O token foi salvo com segurança no .env e não foi exibido."
+echo "Os tokens administrativo e visual foram separados no .env e não foram exibidos."

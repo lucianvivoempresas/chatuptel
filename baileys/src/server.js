@@ -51,6 +51,9 @@ const config = {
   chatwootAccountId: required('CHATWOOT_ACCOUNT_ID'),
   chatwootInboxId: Number(required('CHATWOOT_INBOX_ID')),
   chatwootApiToken: required('CHATWOOT_API_TOKEN'),
+  chatwootBotApiToken: String(
+    process.env.CHATWOOT_BOT_API_TOKEN || process.env.CHATWOOT_API_TOKEN || '',
+  ).trim(),
   chatwootBotUserId: Math.max(0, Number(process.env.CHATWOOT_BOT_USER_ID || 0)),
   defaultCountryCode: (process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '55').replace(/\D/g, ''),
   prefixAgentName: !['false', '0', 'no'].includes(
@@ -190,14 +193,15 @@ async function cleanOldAuditFiles() {
 }
 
 async function chatwootRequest(endpoint, options = {}) {
-  const headers = new Headers(options.headers || {});
-  headers.set('api_access_token', config.chatwootApiToken);
-  if (options.body && !(options.body instanceof FormData)) {
+  const { apiToken = config.chatwootApiToken, ...requestOptions } = options;
+  const headers = new Headers(requestOptions.headers || {});
+  headers.set('api_access_token', apiToken);
+  if (requestOptions.body && !(requestOptions.body instanceof FormData)) {
     headers.set('content-type', 'application/json');
   }
 
   const response = await fetch(`${config.chatwootUrl}${endpoint}`, {
-    ...options,
+    ...requestOptions,
     headers,
   });
   const body = await response.text();
@@ -517,6 +521,7 @@ async function createBotMessage(conversationId, content) {
     `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`,
     {
       method: 'POST',
+      apiToken: config.chatwootBotApiToken,
       body: JSON.stringify({
         content,
         message_type: 'outgoing',
