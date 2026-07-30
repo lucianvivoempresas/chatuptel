@@ -668,7 +668,7 @@ async function conversationHasPersistentHumanMarker(conversationId) {
     `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}`,
   );
   const conversation = response?.payload || response;
-  return hasPersistentHumanMarker(conversation);
+  return hasPersistentHumanMarker(conversation, config.chatwootBotUserId);
 }
 
 async function disableBotForHumanConversation(chat) {

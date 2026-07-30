@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  assignedHumanAgentId,
   hasHumanAgentMessage,
   hasPersistentHumanMarker,
   humanAgentIdFromMessage,
@@ -17,6 +18,24 @@ assert.equal(isOutgoingMessage({ message_type: 1 }), true);
 assert.equal(hasPersistentHumanMarker({ custom_attributes: {} }), false);
 assert.equal(
   hasPersistentHumanMarker({ custom_attributes: { atendimento_humano_ativo: true } }),
+  true,
+);
+assert.equal(
+  assignedHumanAgentId({ meta: { assignee: { id: 7, type: 'User' } } }, 22),
+  7,
+);
+assert.equal(
+  assignedHumanAgentId({ meta: { assignee: { id: 22, type: 'User' } } }, 22),
+  null,
+);
+assert.equal(
+  hasPersistentHumanMarker(
+    {
+      custom_attributes: {},
+      meta: { assignee: { id: 7, type: 'User', name: 'Yasmin Magalhaes' } },
+    },
+    22,
+  ),
   true,
 );
 assert.equal(

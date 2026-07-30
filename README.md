@@ -187,7 +187,9 @@ preenche o contato e a conversa, aplica a etiqueta do produto e encaminha para
 Vendas, Energia ou Pós-venda. Conversas iniciadas por um agente não exibem o
 menu quando o cliente responde. Depois que qualquer agente participa de uma
 conversa, ela é atribuída automaticamente a esse agente e o bot permanece
-desativado nela, inclusive após reinicializações do gateway.
+desativado nela, inclusive após reinicializações do gateway. Atribuir
+manualmente uma conversa a qualquer agente humano também desativa o menu antes
+mesmo da primeira resposta do agente.
 
 O fluxo e o roteiro de teste estão em `docs/chatbot-qualification.md`.
 

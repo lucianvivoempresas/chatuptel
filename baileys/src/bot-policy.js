@@ -47,11 +47,28 @@ export function humanAgentIdFromMessage(message, botUserId = 0) {
   return senderId > 0 ? senderId : null;
 }
 
-export function hasPersistentHumanMarker(conversation) {
+export function assignedHumanAgentId(conversation, botUserId = 0) {
+  const assignee =
+    conversation?.meta?.assignee ||
+    conversation?.assignee ||
+    conversation?.assigned_agent;
+  const assigneeId = Number(
+    assignee?.id ||
+      conversation?.assignee_id ||
+      conversation?.meta?.assignee_id ||
+      0,
+  );
+  if (assigneeId <= 0 || assigneeId === Number(botUserId || 0)) return null;
+  const assigneeType = String(assignee?.type || 'user').toLowerCase();
+  return assigneeType === 'user' ? assigneeId : null;
+}
+
+export function hasPersistentHumanMarker(conversation, botUserId = 0) {
   const attributes = conversation?.custom_attributes || {};
   return (
     attributes.atendimento_humano_ativo === true ||
-    String(attributes.atendimento_humano_ativo || '').toLowerCase() === 'true'
+    String(attributes.atendimento_humano_ativo || '').toLowerCase() === 'true' ||
+    assignedHumanAgentId(conversation, botUserId) !== null
   );
 }
 

@@ -19,6 +19,8 @@ atendente.
    mesmo a palavra `menu` reativa o bot nessa conversa.
 9. Quando um agente inicia ou responde uma conversa, ela é automaticamente
    atribuída a esse agente e recebe a marca persistente de atendimento humano.
+10. Uma atribuição manual feita no Chatwoot também bloqueia imediatamente o
+    menu, mesmo que o agente ainda não tenha enviado uma mensagem pública.
 
 Enquanto nenhum agente tiver participado, o contato pode digitar `menu` para
 reiniciar a qualificação e `6` ou `falar com atendente` para solicitar
