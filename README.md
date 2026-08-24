@@ -239,6 +239,22 @@ Depois configure um destino realmente externo e, opcionalmente, alertas em
 Os follow-ups enviados ao CRM são tarefas exclusivamente internas: exigem
 aprovação do atendente e não enviam mensagens automaticamente.
 
+## Atualizar o Chatwoot
+
+Para atualizar uma instalação existente da versão 4.9.2 Community para a
+4.17.0 Community, use o atualizador gradual e protegido:
+
+```bash
+cd /opt/voltconect-chat
+git pull --ff-only origin main
+chmod +x deploy/upgrade-chatwoot-4.17.sh
+./deploy/upgrade-chatwoot-4.17.sh
+```
+
+O procedimento cria e valida um backup criptografado, aplica as versões
+intermediárias recomendadas, executa as migrações e testa Rails, Sidekiq,
+PostgreSQL e Baileys. Consulte `docs/upgrade-chatwoot-4.17.md` antes de iniciar.
+
 ## Conectar o WhatsApp
 
 Execute no servidor:

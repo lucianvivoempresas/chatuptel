@@ -1,7 +1,7 @@
 name: voltconect-chat
 
 x-chatwoot: &chatwoot
-  image: ${CHATWOOT_IMAGE:-chatwoot/chatwoot:v4.9.2-ce}
+  image: ${CHATWOOT_IMAGE:-chatwoot/chatwoot:v4.17.0-ce}
   env_file:
     - .env
   environment:
