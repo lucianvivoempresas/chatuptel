@@ -21,12 +21,13 @@ test('renderTranscript excludes private notes and caps content', () => {
   assert.doesNotMatch(transcript, /nota secreta/);
 });
 
-test('buildZylooPayload uses the documented minimal request format', () => {
+test('buildZylooPayload uses the documented request format and output limit', () => {
   const messages = [{ role: 'user', content: 'Olá' }];
   const payload = buildZylooPayload(messages);
   assert.deepEqual(payload.messages, messages);
   assert.equal(payload.model, 'zyloo/gpt-4.1');
-  assert.deepEqual(Object.keys(payload).sort(), ['messages', 'model']);
+  assert.equal(payload.max_tokens, 700);
+  assert.deepEqual(Object.keys(payload).sort(), ['max_tokens', 'messages', 'model']);
 });
 
 test('chooseZylooModel migrates the retired free alias', () => {

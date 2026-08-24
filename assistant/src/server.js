@@ -8,6 +8,7 @@ const CHATWOOT_URL = (process.env.CHATWOOT_URL || 'http://rails:3000').replace(/
 const ZYLOO_BASE_URL = (process.env.ZYLOO_BASE_URL || 'https://api.zyloo.io/v1').replace(/\/$/, '');
 const ZYLOO_MODEL = process.env.ZYLOO_MODEL || 'zyloo/gpt-4.1';
 const ZYLOO_API_KEY = process.env.ZYLOO_API_KEY || '';
+const ZYLOO_MAX_TOKENS = Number.parseInt(process.env.ZYLOO_MAX_TOKENS || '700', 10);
 const RATE_LIMIT = Number.parseInt(process.env.ASSISTANT_RATE_LIMIT_PER_MINUTE || '20', 10);
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_MESSAGES = 16;
@@ -178,10 +179,13 @@ async function askZyloo(messages) {
       status: response.status,
       message: providerMessage || 'Resposta de erro sem detalhes',
     }));
-    const error = new Error(response.status === 400
+    const errorMessage = response.status === 400
       ? `A Zyloo recusou a solicitação${providerMessage ? `: ${providerMessage}` : ''}`
-      : `Zyloo indisponível (HTTP ${response.status})`);
-    error.status = response.status === 429 ? 429 : 502;
+      : response.status === 402
+        ? 'Créditos Zyloo insuficientes. Recarregue a carteira da Zyloo para continuar.'
+        : `Zyloo indisponível (HTTP ${response.status})`;
+    const error = new Error(errorMessage);
+    error.status = [402, 429].includes(response.status) ? response.status : 502;
     throw error;
   }
   return normalizeText(payload?.choices?.[0]?.message?.content, 8000);
@@ -232,7 +236,7 @@ async function resolveZylooModel() {
 }
 
 export function buildZylooPayload(messages, model = ZYLOO_MODEL) {
-  return { model, messages };
+  return { model, messages, max_tokens: ZYLOO_MAX_TOKENS };
 }
 
 async function createSuggestion(context) {
