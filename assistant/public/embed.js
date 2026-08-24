@@ -6,6 +6,7 @@
   let route = null;
   let suggestion = null;
   let opened = false;
+  let appLayout = null;
 
   const host = document.createElement('div');
   host.id = 'uptel-assistant-root';
@@ -35,6 +36,37 @@
   const launcher = $('.launcher');
   const drawer = $('.drawer');
   const suggestionsView = $('.suggestions-view');
+
+  function restoreChatwootLayout() {
+    if (!appLayout) return;
+    const { element, width, maxWidth, transition } = appLayout;
+    element.style.width = width;
+    element.style.maxWidth = maxWidth;
+    element.style.transition = transition;
+    appLayout = null;
+  }
+
+  function syncChatwootLayout() {
+    const shouldReserveSpace = opened && route && window.innerWidth >= 1180;
+    if (!shouldReserveSpace) {
+      restoreChatwootLayout();
+      return;
+    }
+    const element = document.querySelector('#app');
+    if (!element) return;
+    if (!appLayout) {
+      appLayout = {
+        element,
+        width: element.style.width,
+        maxWidth: element.style.maxWidth,
+        transition: element.style.transition,
+      };
+    }
+    const drawerWidth = Math.ceil(drawer.getBoundingClientRect().width) || 440;
+    element.style.width = `calc(100% - ${drawerWidth}px)`;
+    element.style.maxWidth = `calc(100% - ${drawerWidth}px)`;
+    element.style.transition = 'width .22s ease, max-width .22s ease';
+  }
 
   function parseRoute() {
     const account = location.pathname.match(/\/app\/accounts\/(\d+)/)?.[1];
@@ -90,7 +122,7 @@
   function insertIntoComposer(text) {
     const editor = document.querySelector('.reply-box .ProseMirror[contenteditable="true"]');
     if (!editor) { copyText(text); toast('Campo de resposta não encontrado; a resposta foi copiada.'); return; }
-    drawer.classList.remove('open'); opened = false;
+    drawer.classList.remove('open'); opened = false; syncChatwootLayout();
     editor.focus();
     const inserted = document.execCommand('insertText', false, text);
     if (!inserted) {
@@ -113,7 +145,7 @@
     try {
       const response = await fetch(`${BASE}/api/status`, { credentials:'same-origin' });
       const status = await response.json();
-      $('.status-text').textContent = status.configured ? 'Zyloo conectado' : 'Zyloo não configurado';
+      $('.status-text').textContent = status.configured ? 'Zyloo configurado' : 'Zyloo não configurado';
       $('.dot').classList.toggle('off', !status.configured);
     } catch { $('.status-text').textContent = 'Assistente indisponível'; $('.dot').classList.add('off'); }
   }
@@ -123,12 +155,12 @@
     const changed = next?.conversationId !== route?.conversationId || next?.accountId !== route?.accountId;
     route = next;
     launcher.classList.toggle('hidden', !route);
-    if (!route) { drawer.classList.remove('open'); opened = false; }
+    if (!route) { drawer.classList.remove('open'); opened = false; syncChatwootLayout(); }
     if (changed) { suggestion = null; emptyView(); }
   }
 
-  launcher.addEventListener('click', () => { opened = !opened; drawer.classList.toggle('open', opened); if (opened) updateStatus(); });
-  $('.close').addEventListener('click', () => { opened = false; drawer.classList.remove('open'); });
+  launcher.addEventListener('click', () => { opened = !opened; drawer.classList.toggle('open', opened); syncChatwootLayout(); if (opened) updateStatus(); });
+  $('.close').addEventListener('click', () => { opened = false; drawer.classList.remove('open'); syncChatwootLayout(); });
   root.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
     root.querySelectorAll('.tab').forEach(item => item.classList.toggle('active', item === tab));
     $('.suggestions-view').classList.toggle('hidden', tab.dataset.tab !== 'suggestions');
@@ -148,6 +180,7 @@
   const originalReplaceState = history.replaceState;
   history.replaceState = function(...args){ originalReplaceState.apply(this,args); queueMicrotask(syncRoute); };
   addEventListener('popstate', syncRoute);
+  addEventListener('resize', syncChatwootLayout);
   new MutationObserver(syncRoute).observe(document.body, { childList:true, subtree:true });
   emptyView(); syncRoute(); updateStatus();
 })();

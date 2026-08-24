@@ -43,6 +43,11 @@ sudo ./deploy/install-assistant.sh
 Atualize o Chatwoot com `Ctrl+F5`, abra uma conversa e clique no botão com
 brilho na lateral direita.
 
+Em telas com pelo menos 1180 pixels de largura, o Chatwoot é redimensionado
+enquanto o painel estiver aberto, mantendo a conversa e o editor visíveis. Em
+telas menores, o painel funciona como uma gaveta sobreposta e pode ser fechado
+no botão `×`.
+
 ## Diagnóstico
 
 ```bash

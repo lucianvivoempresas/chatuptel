@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractJsonObject, normalizeText, renderTranscript } from '../src/server.js';
+import { buildZylooPayload, extractJsonObject, normalizeText, renderTranscript } from '../src/server.js';
 
 test('extractJsonObject accepts fenced model output', () => {
   assert.deepEqual(extractJsonObject('```json\n{"suggested_reply":"Olá"}\n```'), { suggested_reply: 'Olá' });
@@ -19,4 +19,12 @@ test('renderTranscript excludes private notes and caps content', () => {
   assert.match(transcript, /Cliente: Preciso de energia/);
   assert.match(transcript, /Atendente \(Ana\): Posso ajudar/);
   assert.doesNotMatch(transcript, /nota secreta/);
+});
+
+test('buildZylooPayload uses the documented minimal request format', () => {
+  const messages = [{ role: 'user', content: 'Olá' }];
+  const payload = buildZylooPayload(messages);
+  assert.deepEqual(payload.messages, messages);
+  assert.equal(payload.model, 'zyloo/gpt-4.1-free');
+  assert.deepEqual(Object.keys(payload).sort(), ['messages', 'model']);
 });

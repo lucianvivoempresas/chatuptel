@@ -154,6 +154,7 @@ function conversationContext(conversation, messages) {
 
 async function askZyloo(messages) {
   if (!ZYLOO_API_KEY) throw Object.assign(new Error('A chave Zyloo ainda não foi configurada'), { status: 503 });
+  const payloadBody = buildZylooPayload(messages);
   const response = await fetch(`${ZYLOO_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -161,18 +162,31 @@ async function askZyloo(messages) {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ model: ZYLOO_MODEL, messages, temperature: 0.25 }),
+    body: JSON.stringify(payloadBody),
     signal: AbortSignal.timeout(45000),
   });
   const text = await response.text();
   let payload = {};
   try { payload = text ? JSON.parse(text) : {}; } catch { payload = {}; }
   if (!response.ok) {
-    const error = new Error(`Zyloo indisponível (HTTP ${response.status})`);
+    const providerMessage = normalizeText(payload?.error?.message || payload?.message, 300);
+    console.error(JSON.stringify({
+      level: 'error',
+      provider: 'zyloo',
+      status: response.status,
+      message: providerMessage || 'Resposta de erro sem detalhes',
+    }));
+    const error = new Error(response.status === 400
+      ? `A Zyloo recusou a solicitação${providerMessage ? `: ${providerMessage}` : ''}`
+      : `Zyloo indisponível (HTTP ${response.status})`);
     error.status = response.status === 429 ? 429 : 502;
     throw error;
   }
   return normalizeText(payload?.choices?.[0]?.message?.content, 8000);
+}
+
+export function buildZylooPayload(messages) {
+  return { model: ZYLOO_MODEL, messages };
 }
 
 async function createSuggestion(context) {
