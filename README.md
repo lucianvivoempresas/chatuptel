@@ -239,6 +239,23 @@ Depois configure um destino realmente externo e, opcionalmente, alertas em
 Os follow-ups enviados ao CRM são tarefas exclusivamente internas: exigem
 aprovação do atendente e não enviam mensagens automaticamente.
 
+## Assistente Uptel com IA
+
+O projeto inclui um copiloto próprio na lateral das conversas. Ele analisa a
+conversa sob demanda, sugere respostas, resume o atendimento e possui um chat
+interno para o agente. A resposta somente é inserida no editor; o envio sempre
+depende da revisão e do clique do atendente.
+
+Esse componente usa a API da Zyloo e não tenta liberar o Captain proprietário
+do Chatwoot. Instale com:
+
+```bash
+sudo ./deploy/install-assistant.sh
+```
+
+Antes, configure `ZYLOO_API_KEY` somente no `.env` do servidor. Consulte
+`docs/assistant-uptel.md` para instalação, segurança e diagnóstico.
+
 ## Atualizar o Chatwoot
 
 Para atualizar uma instalação existente da versão 4.9.2 Community para a
@@ -316,7 +333,7 @@ Inclua `deploy/nginx/www-chat-redirect.conf` no bloco HTTPS existente de
 
 ## Segurança
 
-- As portas `3100` e `3001` ficam vinculadas a `127.0.0.1`.
+- As portas `3100`, `3001` e `3002` ficam vinculadas a `127.0.0.1`.
 - PostgreSQL e Redis não publicam portas.
 - O webhook e as rotas administrativas exigem `BAILEYS_ADMIN_TOKEN`.
 - Tokens e senhas ficam somente no `.env` do servidor.
