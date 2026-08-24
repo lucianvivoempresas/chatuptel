@@ -6,12 +6,13 @@ import path from 'node:path';
 const PORT = Number.parseInt(process.env.PORT || '3002', 10);
 const CHATWOOT_URL = (process.env.CHATWOOT_URL || 'http://rails:3000').replace(/\/$/, '');
 const ZYLOO_BASE_URL = (process.env.ZYLOO_BASE_URL || 'https://api.zyloo.io/v1').replace(/\/$/, '');
-const ZYLOO_MODEL = process.env.ZYLOO_MODEL || 'zyloo/gpt-4.1-free';
+const ZYLOO_MODEL = process.env.ZYLOO_MODEL || 'zyloo/gpt-4.1';
 const ZYLOO_API_KEY = process.env.ZYLOO_API_KEY || '';
 const RATE_LIMIT = Number.parseInt(process.env.ASSISTANT_RATE_LIMIT_PER_MINUTE || '20', 10);
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_MESSAGES = 16;
 const requestCounters = new Map();
+let modelCache = { expiresAt: 0, model: null };
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public');
 
 const jsonHeaders = {
@@ -154,7 +155,8 @@ function conversationContext(conversation, messages) {
 
 async function askZyloo(messages) {
   if (!ZYLOO_API_KEY) throw Object.assign(new Error('A chave Zyloo ainda não foi configurada'), { status: 503 });
-  const payloadBody = buildZylooPayload(messages);
+  const model = await resolveZylooModel();
+  const payloadBody = buildZylooPayload(messages, model);
   const response = await fetch(`${ZYLOO_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -185,8 +187,52 @@ async function askZyloo(messages) {
   return normalizeText(payload?.choices?.[0]?.message?.content, 8000);
 }
 
-export function buildZylooPayload(messages) {
-  return { model: ZYLOO_MODEL, messages };
+export function chooseZylooModel(configuredModel, availableModels = []) {
+  const configured = normalizeText(configuredModel, 160);
+  const available = new Set(availableModels.map(model => normalizeText(model, 160)).filter(Boolean));
+  if (available.has(configured)) return configured;
+
+  const withoutFreeSuffix = configured.replace(/-free$/i, '');
+  if (available.has(withoutFreeSuffix)) return withoutFreeSuffix;
+
+  const preferred = ['zyloo/gpt-4.1', 'zyloo/gpt-5.6-terra', 'zyloo/gpt-4o'];
+  const replacement = preferred.find(model => available.has(model));
+  if (replacement) return replacement;
+
+  // Mantém a migração conhecida mesmo se o catálogo estiver temporariamente
+  // indisponível. O antigo gpt-4.1-free foi substituído por gpt-4.1.
+  if (/^zyloo\/gpt-4\.1-free$/i.test(configured)) return 'zyloo/gpt-4.1';
+  return configured || 'zyloo/gpt-4.1';
+}
+
+async function resolveZylooModel() {
+  const now = Date.now();
+  if (modelCache.model && modelCache.expiresAt > now) return modelCache.model;
+
+  let availableModels = [];
+  try {
+    const response = await fetch(`${ZYLOO_BASE_URL}/models`, {
+      headers: { Authorization: `Bearer ${ZYLOO_API_KEY}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (response.ok) {
+      const payload = await response.json();
+      availableModels = Array.isArray(payload?.data) ? payload.data.map(model => model?.id) : [];
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({ level: 'warn', provider: 'zyloo', message: 'Catálogo de modelos temporariamente indisponível' }));
+  }
+
+  const model = chooseZylooModel(ZYLOO_MODEL, availableModels);
+  modelCache = { model, expiresAt: now + (15 * 60 * 1000) };
+  if (model !== ZYLOO_MODEL) {
+    console.warn(JSON.stringify({ level: 'warn', provider: 'zyloo', configuredModel: ZYLOO_MODEL, selectedModel: model, message: 'Modelo configurado substituído por um modelo disponível' }));
+  }
+  return model;
+}
+
+export function buildZylooPayload(messages, model = ZYLOO_MODEL) {
+  return { model, messages };
 }
 
 async function createSuggestion(context) {

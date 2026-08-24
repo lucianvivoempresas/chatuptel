@@ -140,7 +140,7 @@ services:
       CHATWOOT_URL: http://rails:3000
       ZYLOO_API_KEY: ${ZYLOO_API_KEY:-}
       ZYLOO_BASE_URL: ${ZYLOO_BASE_URL:-https://api.zyloo.io/v1}
-      ZYLOO_MODEL: ${ZYLOO_MODEL:-zyloo/gpt-4.1-free}
+      ZYLOO_MODEL: ${ZYLOO_MODEL:-zyloo/gpt-4.1}
       ASSISTANT_RATE_LIMIT_PER_MINUTE: ${ASSISTANT_RATE_LIMIT_PER_MINUTE:-20}
     ports:
       # O navegador acessa pelo Nginx; a porta permanece privada no servidor.

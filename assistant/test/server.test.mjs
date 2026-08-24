@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildZylooPayload, extractJsonObject, normalizeText, renderTranscript } from '../src/server.js';
+import { buildZylooPayload, chooseZylooModel, extractJsonObject, normalizeText, renderTranscript } from '../src/server.js';
 
 test('extractJsonObject accepts fenced model output', () => {
   assert.deepEqual(extractJsonObject('```json\n{"suggested_reply":"Olá"}\n```'), { suggested_reply: 'Olá' });
@@ -25,6 +25,20 @@ test('buildZylooPayload uses the documented minimal request format', () => {
   const messages = [{ role: 'user', content: 'Olá' }];
   const payload = buildZylooPayload(messages);
   assert.deepEqual(payload.messages, messages);
-  assert.equal(payload.model, 'zyloo/gpt-4.1-free');
+  assert.equal(payload.model, 'zyloo/gpt-4.1');
   assert.deepEqual(Object.keys(payload).sort(), ['messages', 'model']);
+});
+
+test('chooseZylooModel migrates the retired free alias', () => {
+  assert.equal(
+    chooseZylooModel('zyloo/gpt-4.1-free', ['zyloo/gpt-4.1', 'zyloo/gpt-4o']),
+    'zyloo/gpt-4.1'
+  );
+});
+
+test('chooseZylooModel preserves a configured model that is available', () => {
+  assert.equal(
+    chooseZylooModel('zyloo/gpt-5.6-terra', ['zyloo/gpt-4.1', 'zyloo/gpt-5.6-terra']),
+    'zyloo/gpt-5.6-terra'
+  );
 });

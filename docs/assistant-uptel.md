@@ -27,9 +27,14 @@ No servidor, adicione a chave ao arquivo `/opt/voltconect-chat/.env`:
 ```dotenv
 ZYLOO_API_KEY=valor-secreto
 ZYLOO_BASE_URL=https://api.zyloo.io/v1
-ZYLOO_MODEL=zyloo/gpt-4.1-free
+ZYLOO_MODEL=zyloo/gpt-4.1
 ASSISTANT_RATE_LIMIT_PER_MINUTE=20
 ```
+
+O modelo antigo `zyloo/gpt-4.1-free` foi retirado do catálogo. O serviço
+consulta `/models` antes da primeira análise, mantém a seleção em cache por 15
+minutos e migra automaticamente esse nome antigo para `zyloo/gpt-4.1`. O modelo
+substituto pode consumir o saldo ou os créditos promocionais da conta Zyloo.
 
 Não envie o `.env` ao GitHub. Depois execute:
 
