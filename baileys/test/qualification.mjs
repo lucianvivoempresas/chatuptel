@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   formatCnpj,
   formatCurrency,
+  isEnergyFinalize,
   isMenuRequest,
   parsePositiveInteger,
   parseProduct,
@@ -18,5 +19,7 @@ assert.equal(parsePositiveInteger('Quero 12 linhas'), 12);
 assert.equal(parsePositiveInteger('nenhuma'), null);
 assert.equal(formatCurrency('R$ 1.250,50'), 'R$ 1.250,50');
 assert.equal(isMenuRequest('voltar ao menu'), true);
+assert.equal(isEnergyFinalize('Pode calcular agora'), true);
+assert.equal(isEnergyFinalize('vou enviar outra'), false);
 
 console.log('qualification: ok');

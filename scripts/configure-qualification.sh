@@ -67,6 +67,13 @@ definitions = [
   },
   {
     attribute_model: "contact_attribute",
+    attribute_key: "media_consumo_energia_kwh",
+    attribute_display_name: "Média de consumo (kWh)",
+    attribute_display_type: "number",
+    attribute_description: "Soma das médias mensais das unidades de energia analisadas."
+  },
+  {
+    attribute_model: "contact_attribute",
     attribute_key: "origem_lead",
     attribute_display_name: "Origem do lead",
     attribute_display_type: "list",
@@ -108,6 +115,42 @@ definitions = [
     attribute_display_name: "Valor da proposta",
     attribute_display_type: "currency",
     attribute_description: "Valor principal da proposta comercial."
+  },
+  {
+    attribute_model: "conversation_attribute",
+    attribute_key: "status_simulacao_energia",
+    attribute_display_name: "Status da simulação de energia",
+    attribute_display_type: "list",
+    attribute_values: ["Elegível", "Avaliação do atendente"],
+    attribute_description: "Resultado automático da leitura e das regras da simulação."
+  },
+  {
+    attribute_model: "conversation_attribute",
+    attribute_key: "economia_mensal_energia",
+    attribute_display_name: "Economia mensal de energia",
+    attribute_display_type: "currency",
+    attribute_description: "Economia mensal consolidada calculada para as unidades."
+  },
+  {
+    attribute_model: "conversation_attribute",
+    attribute_key: "economia_anual_energia",
+    attribute_display_name: "Economia anual de energia",
+    attribute_display_type: "currency",
+    attribute_description: "Economia mensal consolidada multiplicada por doze."
+  },
+  {
+    attribute_model: "conversation_attribute",
+    attribute_key: "validade_simulacao_energia",
+    attribute_display_name: "Validade da simulação de energia",
+    attribute_display_type: "date",
+    attribute_description: "Último dia de validade da simulação."
+  },
+  {
+    attribute_model: "conversation_attribute",
+    attribute_key: "resumo_simulacao_energia",
+    attribute_display_name: "Resumo da simulação de energia",
+    attribute_display_type: "text",
+    attribute_description: "Resumo das médias, descontos e economias separados por estado."
   },
   {
     attribute_model: "conversation_attribute",

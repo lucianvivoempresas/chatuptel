@@ -26,11 +26,13 @@ import {
 } from './bot-policy.js';
 import { agentNameFromPayload, formatAgentMessage } from './message-format.js';
 import { simulateEnergyDiscount } from './energy-simulation.js';
+import { extractEnergyInvoice, parseGeminiApiKeys } from './energy-invoice.js';
 import {
   MENU_TEXT,
   PRODUCT_OPTIONS,
   formatCnpj,
   formatCurrency,
+  isEnergyFinalize,
   isMenuRequest,
   normalizeText,
   parsePositiveInteger,
@@ -41,6 +43,11 @@ const required = (name) => {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`Variável obrigatória ausente: ${name}`);
   return value;
+};
+
+const positiveNumber = (value, fallback) => {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 };
 
 const config = {
@@ -67,6 +74,14 @@ const config = {
   energiaCrmIntegrationToken: String(
     process.env.ENERGIA_CRM_INTEGRATION_TOKEN || '',
   ).trim(),
+  geminiApiKeys: parseGeminiApiKeys(
+    process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '',
+  ),
+  geminiModel: String(process.env.GEMINI_INVOICE_MODEL || 'gemini-2.5-flash').trim(),
+  energyInvoiceMaxBytes: Math.max(1024 * 1024, positiveNumber(
+    process.env.ENERGY_INVOICE_MAX_BYTES,
+    15 * 1024 * 1024,
+  )),
   auditDir: process.env.BAILEYS_AUDIT_DIR || '/data/audit',
   auditRetentionDays: Math.max(1, Number(process.env.BAILEYS_AUDIT_RETENTION_DAYS || 90)),
   globalPerMinute: Math.max(1, Number(process.env.WHATSAPP_GLOBAL_PER_MINUTE || 60)),
@@ -661,6 +676,25 @@ function newBotState() {
   };
 }
 
+async function energyInvoiceMedia(message) {
+  const media = mediaInfo(message);
+  if (!media) return null;
+  const mimeType = String(media.mimeType || '').toLowerCase().split(';')[0];
+  if (!['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(mimeType)) {
+    return { unsupported: true, ...media, mimeType };
+  }
+  const buffer = await downloadMediaMessage(
+    message,
+    'buffer',
+    {},
+    { logger: baileysLogger, reuploadRequest: socket.updateMediaMessage },
+  );
+  if (buffer.length > config.energyInvoiceMaxBytes) {
+    return { tooLarge: true, ...media, mimeType, size: buffer.length };
+  }
+  return { ...media, mimeType, buffer, size: buffer.length };
+}
+
 async function conversationHasHumanAgentMessage(conversationId) {
   const response = await chatwootRequest(
     `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`,
@@ -715,10 +749,100 @@ function qualificationSummary(answers) {
     answers.city && `Cidade/UF: ${answers.city}`,
     answers.lines && `Linhas: ${answers.lines}`,
     answers.energyValue && `Conta de energia: ${answers.energyValue}`,
+    answers.energySimulationSummary && `Simulação: ${answers.energySimulationSummary}`,
     answers.need && `Necessidade: ${answers.need}`,
   ]
     .filter(Boolean)
     .join(' | ');
+}
+
+function formatBrl(value) {
+  return Number(value || 0).toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  });
+}
+
+function formatPercent(value) {
+  return `${Number(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
+}
+
+function energyReviewLabel(reason) {
+  const labels = {
+    tarifa_social_ou_nis: 'NIS/Tarifa Social',
+    fatura_ilegivel: 'fatura ilegível',
+    uf_fora_da_tabela: 'UF fora da tabela automática',
+    consumo_nao_identificado: 'consumo não identificado',
+    consumo_abaixo_de_300_kwh: 'consumo abaixo de 300 kWh',
+    valor_da_fatura_nao_identificado: 'valor da fatura não identificado',
+  };
+  return labels[reason] || reason;
+}
+
+function energySimulationSummary(simulation) {
+  return simulation.groups.map(group => {
+    const discount = group.baseDiscountRate === null
+      ? 'avaliação do atendente'
+      : `${formatPercent(group.baseDiscountRate)} base`;
+    return `${group.state}: ${group.groupAverageKwh.toLocaleString('pt-BR')} kWh, ${discount}, economia mensal ${formatBrl(group.monthlySavings)}`;
+  }).join(' / ');
+}
+
+function energySimulationCustomerMessage(simulation, units) {
+  const sections = simulation.groups.map(group => {
+    const lines = [
+      `*${group.state}* — média agrupada: *${group.groupAverageKwh.toLocaleString('pt-BR')} kWh/mês*`,
+    ];
+    if (group.baseDiscountRate !== null) {
+      lines.push(`Desconto da tabela: *${formatPercent(group.baseDiscountRate)}*`);
+      for (const unit of group.units) {
+        const label = unit.id ? `Unidade ${unit.id}` : 'Unidade';
+        lines.push(
+          `${label}: desconto final *${formatPercent(unit.finalDiscountRate)}*, `
+          + `economia estimada de *${formatBrl(unit.monthlySavings)} por mês*`,
+        );
+      }
+      lines.push(`Economia anual estimada neste estado: *${formatBrl(group.annualSavings)}*`);
+    }
+    if (group.reviewReasons.length) {
+      lines.push(`Validação do atendente: ${group.reviewReasons.map(energyReviewLabel).join(', ')}.`);
+    }
+    return lines.join('\n');
+  });
+  const holderTypes = new Set(units.map(unit => unit.holderType));
+  const documents = [];
+  if (holderTypes.has('company')) {
+    documents.push('Para unidade em nome de empresa: Contrato Social, RG e CPF do gestor, e-mail e telefone.');
+  }
+  if (holderTypes.has('person')) {
+    documents.push('Para unidade em nome de pessoa: RG e CPF do titular, e-mail e telefone.');
+  }
+  const validity = simulation.validity;
+  const hasAutomaticSavings = simulation.groups.some(group => group.baseDiscountRate !== null);
+  return [
+    'Concluí a leitura das suas faturas e preparei a simulação:',
+    ...sections,
+    hasAutomaticSavings
+      ? `*Economia automática estimada:* ${formatBrl(simulation.monthlySavings)} por mês e ${formatBrl(simulation.annualSavings)} por ano.`
+      : 'A economia será calculada pelo atendente após validar as unidades fora da regra automática.',
+    `*Validade:* ${validity.startsAt.split('-').reverse().join('/')} até ${validity.endsAt.split('-').reverse().join('/')}.`,
+    simulation.status === 'operator_review'
+      ? 'A simulação ficará sujeita à validação do nosso atendente antes da proposta.'
+      : 'Agora um atendente validará a proposta e continuará a contratação.',
+    ...documents,
+  ].filter(Boolean).join('\n\n');
+}
+
+function energySimulationAttributes(simulation) {
+  return {
+    status_simulacao_energia: simulation.status === 'eligible'
+      ? 'Elegível'
+      : 'Avaliação do atendente',
+    economia_mensal_energia: simulation.monthlySavings,
+    economia_anual_energia: simulation.annualSavings,
+    validade_simulacao_energia: simulation.validity.endsAt,
+    resumo_simulacao_energia: energySimulationSummary(simulation).slice(0, 2000),
+  };
 }
 
 function energiaCrmConfigured() {
@@ -749,6 +873,11 @@ function buildEnergiaCrmPayload(chat) {
     lead: {
       product: answers.productName,
       monthlyBill: answers.energyValue,
+      energySimulation: answers.energySimulation || null,
+      estimatedMonthlySavings: answers.energySimulation?.monthlySavings ?? null,
+      estimatedAnnualSavings: answers.energySimulation?.annualSavings ?? null,
+      simulationStatus: answers.energySimulation?.status ?? null,
+      simulationValidUntil: answers.energySimulation?.validity?.endsAt ?? null,
       summary: qualificationSummary(answers),
     },
   };
@@ -848,7 +977,7 @@ async function flushEnergiaCrmOutbox() {
   }
 }
 
-async function finishQualification(chat, jid) {
+async function finishQualification(chat, jid, options = {}) {
   const bot = chat.bot;
   const product = PRODUCT_OPTIONS[bot.answers.productKey];
   const contactAttributes = {
@@ -862,6 +991,12 @@ async function finishQualification(chat, jid) {
   if (bot.answers.energyValue) {
     contactAttributes.valor_conta_energia = bot.answers.energyValue;
   }
+  if (bot.answers.energySimulation) {
+    contactAttributes.media_consumo_energia_kwh = bot.answers.energySimulation.groups.reduce(
+      (sum, group) => sum + Number(group.groupAverageKwh || 0),
+      0,
+    );
+  }
 
   const summary = qualificationSummary(bot.answers);
   await updateContactAttributes(chat.contactId, contactAttributes);
@@ -869,6 +1004,9 @@ async function finishQualification(chat, jid) {
     status_lead: 'Em qualificação',
     proxima_acao: `Atendimento pela equipe ${product.team}`,
     resumo_atendimento: summary,
+    ...(bot.answers.energySimulation
+      ? energySimulationAttributes(bot.answers.energySimulation)
+      : {}),
   });
   await mergeConversationLabels(chat.conversationId, ['novo-lead', product.label]);
   await assignConversationTeam(chat.conversationId, product.team);
@@ -882,7 +1020,8 @@ async function finishQualification(chat, jid) {
   await sendBotMessage(
     chat,
     jid,
-    `Obrigado! Já registrei seus dados e encaminhei seu atendimento para nossa equipe de *${product.name}*.\n\nUm consultor continuará a conversa por aqui.`,
+    options.customerMessage
+      || `Obrigado! Já registrei seus dados e encaminhei seu atendimento para nossa equipe de *${product.name}*.\n\nUm consultor continuará a conversa por aqui.`,
   );
   logger.info(
     { conversationId: chat.conversationId, product: product.name, team: product.team },
@@ -890,7 +1029,7 @@ async function finishQualification(chat, jid) {
   );
 }
 
-async function handoffToHuman(chat, jid) {
+async function handoffToHuman(chat, jid, message) {
   chat.bot.handoff = true;
   chat.bot.stage = 'handoff';
   chat.bot.completedAt = new Date().toISOString();
@@ -903,11 +1042,129 @@ async function handoffToHuman(chat, jid) {
   await sendBotMessage(
     chat,
     jid,
-    'Certo! Encaminhei sua conversa para um de nossos atendentes. Assim que possível, alguém continuará o atendimento por aqui.',
+    message
+      || 'Certo! Encaminhei sua conversa para um de nossos atendentes. Assim que possível, alguém continuará o atendimento por aqui.',
   );
 }
 
-async function processQualificationBot(chat, jid, text) {
+function upsertEnergyUnit(bot, invoice) {
+  bot.answers.energyUnits ||= [];
+  const normalized = {
+    id: invoice.unitId,
+    state: invoice.state,
+    holderType: invoice.holderType,
+    consumptionMonths: invoice.consumptionMonths,
+    consumptions: invoice.consumptions,
+    billTotal: invoice.billTotal,
+    publicLighting: invoice.publicLighting,
+    pisRate: invoice.pisRate,
+    cofinsRate: invoice.cofinsRate,
+    hasNis: invoice.hasNis,
+    lowIncome: invoice.lowIncome,
+    readable: invoice.readable,
+    confidence: invoice.confidence,
+    warnings: invoice.warnings,
+  };
+  const fingerprint = unit => unit.id
+    ? `${unit.state}:${unit.id}`
+    : `${unit.state}:${unit.billTotal}:${unit.consumptions?.[0] || ''}`;
+  const existing = bot.answers.energyUnits.findIndex(
+    unit => fingerprint(unit) === fingerprint(normalized),
+  );
+  if (existing >= 0) bot.answers.energyUnits[existing] = normalized;
+  else bot.answers.energyUnits.push(normalized);
+  return normalized;
+}
+
+async function analyzeEnergyInvoice(chat, jid, incomingMedia) {
+  const bot = chat.bot;
+  if (!incomingMedia) {
+    await sendBotMessage(
+      chat,
+      jid,
+      'Envie uma fatura em *PDF ou imagem*. Se já enviou todas as unidades, digite *CALCULAR*.',
+    );
+    return;
+  }
+  if (incomingMedia.unsupported) {
+    await sendBotMessage(chat, jid, 'Use um arquivo PDF ou uma imagem JPG, PNG ou WEBP da fatura.');
+    return;
+  }
+  if (incomingMedia.tooLarge) {
+    await sendBotMessage(chat, jid, 'O arquivo está muito grande. Envie uma versão com até 15 MB.');
+    return;
+  }
+
+  let invoice;
+  try {
+    invoice = await extractEnergyInvoice({
+      buffer: incomingMedia.buffer,
+      mimeType: incomingMedia.mimeType,
+      apiKeys: config.geminiApiKeys,
+      model: config.geminiModel,
+    });
+  } catch (error) {
+    logger.warn(
+      { conversationId: chat.conversationId, status: error.status, error: error.message },
+      'Falha na leitura automática da fatura',
+    );
+    await handoffToHuman(
+      chat,
+      jid,
+      'Não consegui concluir a leitura automática agora. Encaminhei a fatura para um atendente analisar sem você precisar reenviá-la.',
+    );
+    return;
+  }
+
+  if (!invoice.readable) {
+    bot.energyReadAttempts = Number(bot.energyReadAttempts || 0) + 1;
+    await saveState();
+    if (bot.energyReadAttempts >= 2) {
+      await handoffToHuman(
+        chat,
+        jid,
+        'Ainda não consegui ler todos os dados com segurança. A fatura já está no atendimento e será analisada por uma pessoa.',
+      );
+      return;
+    }
+    await sendBotMessage(
+      chat,
+      jid,
+      'A fatura ficou ilegível ou faltaram dados essenciais. Envie outra foto mais nítida, mostrando a página inteira, ou o PDF original.',
+    );
+    return;
+  }
+
+  bot.energyReadAttempts = 0;
+  const unit = upsertEnergyUnit(bot, invoice);
+  bot.stage = 'energy_more';
+  await saveState();
+  const average = unit.consumptions.reduce((sum, value) => sum + value, 0) / unit.consumptions.length;
+  await sendBotMessage(
+    chat,
+    jid,
+    `Fatura lida com segurança: *${unit.state}*, média de *${average.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kWh/mês* e total de *${formatBrl(unit.billTotal)}*.\n\nEnvie a fatura de outra unidade ou digite *CALCULAR* para receber a simulação.`,
+  );
+}
+
+async function completeEnergySimulation(chat, jid) {
+  const units = chat.bot.answers.energyUnits || [];
+  if (!units.length) {
+    await sendBotMessage(chat, jid, 'Primeiro envie ao menos uma fatura em PDF ou imagem.');
+    return;
+  }
+  const simulation = simulateEnergyDiscount({ units, simulatedAt: new Date() });
+  const billTotal = units.reduce((sum, unit) => sum + Number(unit.billTotal || 0), 0);
+  chat.bot.answers.energyValue = formatBrl(billTotal);
+  chat.bot.answers.energySimulation = simulation;
+  chat.bot.answers.energySimulationSummary = energySimulationSummary(simulation);
+  await saveState();
+  await finishQualification(chat, jid, {
+    customerMessage: energySimulationCustomerMessage(simulation, units),
+  });
+}
+
+async function processQualificationBot(chat, jid, text, incomingMedia = null) {
   if (!config.botEnabled) return;
   if (await humanAlreadyParticipated(chat)) return;
 
@@ -1018,13 +1275,21 @@ async function processQualificationBot(chat, jid, text) {
     }
     bot.answers.city = String(text).trim().slice(0, 100);
     const product = PRODUCT_OPTIONS[bot.answers.productKey];
-    bot.stage = product.nextStage;
+    bot.stage = product.nextStage === 'energy_invoice' && !config.geminiApiKeys.length
+      ? 'energy_value'
+      : product.nextStage;
     await saveState();
     await updateContactAttributes(chat.contactId, {
       cidade_uf: bot.answers.city,
     });
     if (bot.stage === 'lines') {
       await sendBotMessage(chat, jid, 'Quantas linhas móveis sua empresa precisa?');
+    } else if (bot.stage === 'energy_invoice') {
+      await sendBotMessage(
+        chat,
+        jid,
+        'Envie sua *fatura de energia em PDF ou imagem*. Vou ler os últimos consumos, calcular o desconto e a economia anual.\n\nVocê pode enviar várias unidades, uma por vez. Ao enviar, você autoriza a análise automatizada da fatura exclusivamente para esta simulação. Não envie RG, CPF ou outros documentos pessoais nesta etapa.',
+      );
     } else if (bot.stage === 'energy_value') {
       await sendBotMessage(
         chat,
@@ -1052,6 +1317,16 @@ async function processQualificationBot(chat, jid, text) {
     return;
   }
 
+  if (bot.stage === 'energy_invoice' || bot.stage === 'energy_more') {
+    if (isEnergyFinalize(text)) {
+      await completeEnergySimulation(chat, jid);
+      return;
+    }
+    await analyzeEnergyInvoice(chat, jid, incomingMedia);
+    return;
+  }
+
+  // Compatibilidade com qualificações iniciadas antes da leitura automática.
   if (bot.stage === 'energy_value') {
     const energyValue = formatCurrency(text);
     if (!energyValue) {
@@ -1114,7 +1389,24 @@ async function handleIncoming(message) {
     contentSha256: auditHash(text),
     hasMedia: Boolean(message.message && !text),
   });
-  await processQualificationBot(chat, chat.outboundJid || phoneJid, text);
+  const energyStage = ['energy_invoice', 'energy_more'].includes(chat.bot?.stage);
+  let incomingMedia = null;
+  if (energyStage && mediaInfo(message)) {
+    try {
+      incomingMedia = await energyInvoiceMedia(message);
+    } catch (error) {
+      logger.warn(
+        { conversationId: chat.conversationId, error: error.message },
+        'Não foi possível baixar a fatura para análise',
+      );
+    }
+  }
+  await processQualificationBot(
+    chat,
+    chat.outboundJid || phoneJid,
+    text,
+    incomingMedia,
+  );
 }
 
 function messageTimestampSeconds(message) {
@@ -1692,6 +1984,12 @@ app.get('/operations/status', (request, response) => {
       enabled: config.historySyncDays > 0,
       days: config.historySyncDays,
       ...state.historyStats,
+    },
+    invoiceReading: {
+      configured: config.geminiApiKeys.length > 0,
+      keyCount: config.geminiApiKeys.length,
+      model: config.geminiModel,
+      maxBytes: config.energyInvoiceMaxBytes,
     },
   });
 });

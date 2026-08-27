@@ -15,7 +15,7 @@ export const PRODUCT_OPTIONS = {
     name: 'Energia',
     label: 'energia',
     team: 'energia',
-    nextStage: 'energy_value',
+    nextStage: 'energy_invoice',
   },
   devices: {
     name: 'Aparelhos',
@@ -91,4 +91,10 @@ export function formatCurrency(value) {
 
 export function isMenuRequest(value) {
   return /\b(menu|inicio|comecar|recomecar)\b/.test(normalizeText(value));
+}
+
+export function isEnergyFinalize(value) {
+  return /\b(calcular|simular|finalizar|concluir|pronto|terminei|unica|unico)\b/.test(
+    normalizeText(value),
+  );
 }

@@ -227,6 +227,9 @@ de exceções ao atendente. A API interna protegida é `POST /energy/simulate`.
 
 As regras e o contrato da API estão em `docs/energy-discount-simulation.md`.
 
+O fluxo de leitura automática de PDF/imagem, configuração do Gemini e
+persistência no Chatwoot/CRM está em `docs/automatic-invoice-reading.md`.
+
 ## Segurança, estabilidade e backups
 
 O gateway mantém respostas em fila persistente, aplica limites seguros de

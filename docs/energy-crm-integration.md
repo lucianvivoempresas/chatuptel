@@ -13,6 +13,8 @@ continuam normalmente no Chatwoot.
 - Atualizações não sobrescrevem etapa, vendedor, valor ou observações alterados
   manualmente no EnergiaVolt.
 - O EnergiaVolt cria backup antes da escrita.
+- A simulação de energia é salva de forma estruturada na oportunidade, com
+  unidades, descontos, economia, validade e status de avaliação humana.
 
 ## Configuração
 

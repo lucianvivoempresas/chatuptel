@@ -61,6 +61,8 @@ try {
   const operationsBody = await operations.json();
   assert.equal(operationsBody.pendingOutbound, 0);
   assert.equal(operationsBody.rateLimits.globalPerMinute, 60);
+  assert.equal(operationsBody.invoiceReading.configured, false);
+  assert.equal(operationsBody.invoiceReading.model, 'gemini-2.5-flash');
 
   const history = await fetch(`http://127.0.0.1:${port}/history/status?token=test-token`);
   assert.equal(history.status, 200);
