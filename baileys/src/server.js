@@ -25,6 +25,7 @@ import {
   suppressQualificationBot,
 } from './bot-policy.js';
 import { agentNameFromPayload, formatAgentMessage } from './message-format.js';
+import { simulateEnergyDiscount } from './energy-simulation.js';
 import {
   MENU_TEXT,
   PRODUCT_OPTIONS,
@@ -1730,6 +1731,15 @@ app.post('/crm-sync/retry', async (request, response) => {
   await saveState();
   void flushEnergiaCrmOutbox();
   return response.json({ accepted: true, pending: Object.keys(state.crmOutbox).length });
+});
+
+app.post('/energy/simulate', (request, response) => {
+  if (!authorized(request)) return response.status(401).json({ error: 'Não autorizado' });
+  try {
+    return response.json(simulateEnergyDiscount(request.body));
+  } catch (error) {
+    return response.status(422).json({ error: error.message });
+  }
 });
 
 app.get('/qr.png', async (request, response, next) => {

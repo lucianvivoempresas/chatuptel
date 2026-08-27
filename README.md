@@ -219,6 +219,14 @@ atendimento e não duplica contatos ou oportunidades.
 
 As instruções estão em `docs/energy-crm-integration.md`.
 
+## Simulação de desconto de energia
+
+O projeto possui um motor determinístico para a simulação da Órigo, com faixas
+por UF, múltiplas unidades, PIS/COFINS, economia anual, validade e encaminhamento
+de exceções ao atendente. A API interna protegida é `POST /energy/simulate`.
+
+As regras e o contrato da API estão em `docs/energy-discount-simulation.md`.
+
 ## Segurança, estabilidade e backups
 
 O gateway mantém respostas em fila persistente, aplica limites seguros de
