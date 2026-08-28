@@ -101,4 +101,9 @@ test('versioned repository knowledge loads without errors and ignores template d
   const results = await base.search('Qual desconto para 5200 kWh em Pernambuco?');
   assert.equal(results[0].documentId, 'energia-origo-regras');
   assert.match(results[0].text, /30%/);
+
+  const vivoResults = await base.search('Quais são os planos e valores do Smart Empresas?');
+  assert.equal(vivoResults[0].documentId, 'vivo-book-destaque');
+  assert.match(vivoResults.map(result => result.text).join('\n'), /R\$ 39,99 por linha/);
+  assert.match(vivoResults.map(result => result.text).join('\n'), /R\$ 99,99 por linha/);
 });

@@ -1,7 +1,7 @@
 ---
 id: vivo-book-destaque
 title: Vivo Empresas — Ofertas em Destaque Small Business
-version: 2026.08
+version: 2026.08.1
 status: active
 updated_at: 2026-08-28
 valid_from: 2026-08-01
@@ -9,7 +9,7 @@ valid_until: 2026-08-31
 source_period: 2026-08
 products: vivo móvel, internet empresarial, voz, cloud, segurança, iot
 states: BR
-tags: vivo, small business, plano móvel, fibra, voz, microsoft 365, google workspace, internet dedicada, sd-wan
+tags: vivo, small business, plano móvel, preços, valores, smart empresas, fibra, voz, microsoft 365, google workspace, internet dedicada, sd-wan
 ---
 # Uso comercial
 
@@ -30,6 +30,24 @@ Não misture ofertas de energia apresentadas no book da Vivo com a oferta Órigo
 O book apresenta famílias como Vivo Easy Lite, Smart Empresas, Port-In, Data GB Apps, Vivo V, New Plus, Vivo Travel, LDI, Vivo Up, M2M e Empresa 5G. Há complementos de gestão e proteção, incluindo Vivo Gestão, MDM, Gestão Dispositivo, limpeza ou bloqueio de tela, seguro e serviços digitais.
 
 Portabilidade e contratação em volume podem ter condições específicas. Não calcule desconto por conta própria: valide quantidade de acessos, CNPJ, elegibilidade e tabela vigente.
+
+# Planos Smart Empresas - ofertas de agosto de 2026
+
+Valores mensais por linha apresentados na página 17 do book, disponíveis via Simplifique:
+
+- Plano 6 GB: internet total de 19 GB com os bônus; R$ 39,99 por linha.
+- Plano 15 GB: internet total de 28 GB com os bônus; R$ 54,99 por linha.
+- Plano 20 GB: internet total de 33 GB com os bônus; R$ 59,99 por linha.
+- Plano 30 GB: internet total de 43 GB com os bônus; R$ 69,99 por linha.
+- Plano 40 GB: internet total de 53 GB com os bônus; R$ 79,99 por linha.
+- Plano 50 GB: internet total de 63 GB com os bônus; R$ 89,99 por linha.
+- Plano 100 GB: internet total de 113 GB com os bônus; R$ 99,99 por linha.
+
+A internet total considera 10 GB de bônus de Port In por linha e 3 GB de bônus por débito automático. O bônus de débito automático é por CNPJ. Os planos possuem SVAs obrigatórios nas categorias Standard, Avançado ou Ultra, conforme a oferta, além dos serviços mostrados na tabela. Confirmar a composição no Simplifique antes da contratação.
+
+Há pacote opcional de 10 GB para apps por R$ 10,00 mensais por pacote e por linha, nas categorias Redes Sociais, Comunicação ou Streaming. O pacote não deve ser somado ao preço nem à franquia principal sem o cliente solicitá-lo.
+
+Esses preços são exclusivos do book de agosto de 2026 e não devem ser usados depois de 31/08/2026. Condição final, elegibilidade, disponibilidade, impostos e eventuais alterações devem ser validados no Simplifique ou Portal Vivo B2B.
 
 # Produtividade e serviços digitais
 
