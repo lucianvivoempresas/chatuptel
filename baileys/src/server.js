@@ -120,7 +120,12 @@ let auditWriteQueue = Promise.resolve();
 let crmFlushRunning = false;
 let outboundFlushRunning = false;
 let historyImportQueue = Promise.resolve();
+let chatwootPollRunning = false;
+let chatwootPollLastAt = null;
+let chatwootPollLastError = null;
+const chatwootPollStartedAt = Math.floor(Date.now() / 1000);
 const processedMessages = new Set();
+const observedChatwootMessages = new Set();
 const registeredJids = new Map();
 const sentMessages = new Map();
 const teamIds = new Map();
@@ -2021,6 +2026,67 @@ async function handleChatwootWebhook(payload) {
   return { queued: true, connected: connectionStatus === 'connected' };
 }
 
+function chatwootCreatedAtSeconds(value) {
+  if (typeof value === 'number') return value > 1_000_000_000_000 ? value / 1000 : value;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric > 1_000_000_000_000 ? numeric / 1000 : numeric;
+  }
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed / 1000 : 0;
+}
+
+async function pollChatwootHumanMessages() {
+  if (chatwootPollRunning) return;
+  chatwootPollRunning = true;
+  try {
+    const response = await chatwootRequest(
+      `/api/v1/accounts/${config.chatwootAccountId}/conversations?inbox_id=${config.chatwootInboxId}&status=all&sort_by=last_activity_at_desc&page=1`,
+    );
+    const conversations = Array.isArray(response)
+      ? response
+      : response?.data?.payload || response?.payload || [];
+
+    for (const conversation of conversations) {
+      const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+      for (const message of messages) {
+        const messageId = String(message?.id || '');
+        if (!messageId || observedChatwootMessages.has(messageId)) continue;
+        observedChatwootMessages.add(messageId);
+        if (observedChatwootMessages.size > 5000) {
+          observedChatwootMessages.delete(observedChatwootMessages.values().next().value);
+        }
+
+        if (chatwootCreatedAtSeconds(message.created_at) < chatwootPollStartedAt) continue;
+        if (!humanAgentIdFromMessage(message, config.chatwootBotUserId)) continue;
+        if (state.outboundDelivered[messageId] || state.outboundQueue[messageId]) continue;
+
+        logger.warn(
+          { conversationId: conversation.id, messageId },
+          'Webhook ausente; mensagem humana recuperada pela contingência do Chatwoot',
+        );
+        await handleChatwootWebhook({
+          ...message,
+          event: 'message_created',
+          conversation,
+          conversation_id: conversation.id,
+          inbox: { id: conversation.inbox_id || config.chatwootInboxId },
+        });
+      }
+    }
+    chatwootPollLastAt = new Date().toISOString();
+    chatwootPollLastError = null;
+  } catch (error) {
+    const errorMessage = String(error.message || error).slice(0, 500);
+    if (errorMessage !== chatwootPollLastError) {
+      logger.error({ err: error }, 'Falha na contingência de mensagens do Chatwoot');
+    }
+    chatwootPollLastError = errorMessage;
+  } finally {
+    chatwootPollRunning = false;
+  }
+}
+
 function authorized(request) {
   const bearer = request.headers.authorization?.replace(/^Bearer\s+/i, '');
   return bearer === config.adminToken || request.query.token === config.adminToken;
@@ -2069,6 +2135,10 @@ app.get('/operations/status', (request, response) => {
       keyCount: config.geminiApiKeys.length,
       model: config.geminiModel,
       maxBytes: config.energyInvoiceMaxBytes,
+    },
+    chatwootOutboundRecovery: {
+      lastPollAt: chatwootPollLastAt,
+      lastError: chatwootPollLastError,
     },
   });
 });
@@ -2229,6 +2299,11 @@ const outboundTimer = setInterval(() => {
   void flushOutboundQueue();
 }, 2000);
 outboundTimer.unref();
+const chatwootPollTimer = setInterval(() => {
+  void pollChatwootHumanMessages();
+}, 3000);
+chatwootPollTimer.unref();
+void pollChatwootHumanMessages();
 if (Object.keys(state.crmOutbox).length > 0) {
   if (energiaCrmConfigured()) {
     void flushEnergiaCrmOutbox();
