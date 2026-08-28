@@ -11,7 +11,7 @@ import {
   rankKnowledgeChunks,
 } from '../src/knowledge-base.js';
 
-const repositoryKnowledge = path.resolve(
+const repositoryKnowledge = process.env.KNOWLEDGE_BASE_DIR || path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../knowledge',
 );

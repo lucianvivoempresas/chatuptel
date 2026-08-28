@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json ./
 COPY src ./src
 COPY public ./public
+COPY test ./test
 
 RUN mkdir -p /data && chown node:node /data
 
