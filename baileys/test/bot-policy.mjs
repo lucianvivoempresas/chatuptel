@@ -5,6 +5,7 @@ import {
   hasPersistentHumanMarker,
   humanAgentIdFromMessage,
   isBotAuthoredMessage,
+  isExternalWhatsAppOutgoing,
   isOutgoingMessage,
   markHumanManaged,
   suppressQualificationBot,
@@ -15,6 +16,21 @@ assert.equal(suppressQualificationBot({ humanManaged: true }), true);
 assert.equal(suppressQualificationBot({ bot: { handoff: true } }), true);
 assert.equal(isOutgoingMessage({ message_type: 'outgoing' }), true);
 assert.equal(isOutgoingMessage({ message_type: 1 }), true);
+assert.equal(
+  isExternalWhatsAppOutgoing({ key: { id: 'phone-1', fromMe: true } }, new Set()),
+  true,
+);
+assert.equal(
+  isExternalWhatsAppOutgoing(
+    { key: { id: 'gateway-1', fromMe: true } },
+    new Set(['gateway-1']),
+  ),
+  false,
+);
+assert.equal(
+  isExternalWhatsAppOutgoing({ key: { id: 'customer-1', fromMe: false } }, new Set()),
+  false,
+);
 assert.equal(hasPersistentHumanMarker({ custom_attributes: {} }), false);
 assert.equal(
   hasPersistentHumanMarker({ custom_attributes: { atendimento_humano_ativo: true } }),

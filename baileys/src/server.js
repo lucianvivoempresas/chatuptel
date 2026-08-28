@@ -9,6 +9,7 @@ import makeWASocket, {
   DisconnectReason,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
+  generateMessageIDV2,
   getContentType,
   normalizeMessageContent,
   useMultiFileAuthState,
@@ -20,6 +21,7 @@ import {
   hasHumanAgentMessage,
   hasPersistentHumanMarker,
   humanAgentIdFromMessage,
+  isExternalWhatsAppOutgoing,
   isOutgoingMessage,
   markHumanManaged,
   suppressQualificationBot,
@@ -110,6 +112,7 @@ let state = {
   sendLimits: {},
   historyImported: {},
   historyStats: {},
+  gatewaySentMessageIds: {},
   botPolicyVersion: 2,
 };
 let stateSaveQueue = Promise.resolve();
@@ -142,6 +145,7 @@ async function loadState() {
     state.sendLimits ||= {};
     state.historyImported ||= {};
     state.historyStats ||= {};
+    state.gatewaySentMessageIds ||= {};
     if (Number(state.botPolicyVersion || 0) < 2) {
       for (const chat of Object.values(state.chats)) {
         delete chat.humanParticipationChecked;
@@ -1352,13 +1356,20 @@ async function handleIncoming(message) {
   const jid = message.key.remoteJid;
   if (
     !jid ||
-    message.key.fromMe ||
     jid.endsWith('@g.us') ||
     jid === 'status@broadcast' ||
+    jid.endsWith('@newsletter') ||
     processedMessages.has(message.key.id)
   ) {
     return;
   }
+
+  const gatewayMessageIds = new Set([
+    ...sentMessages.keys(),
+    ...Object.keys(state.gatewaySentMessageIds || {}),
+  ]);
+  const externalOutgoing = isExternalWhatsAppOutgoing(message, gatewayMessageIds);
+  if (message.key.fromMe && !externalOutgoing) return;
 
   processedMessages.add(message.key.id);
   if (processedMessages.size > 2000) {
@@ -1368,6 +1379,60 @@ async function handleIncoming(message) {
   const phoneJid =
     message.key.remoteJidAlt?.endsWith('@s.whatsapp.net') ? message.key.remoteJidAlt : jid;
   let chat = await ensureConversation(jid, message.pushName, phoneJid);
+
+  if (externalOutgoing) {
+    markHumanManaged(chat);
+    await saveState();
+    try {
+      await mergeConversationAttributes(chat.conversationId, {
+        atendimento_humano_ativo: true,
+        agente_responsavel_nome: 'WhatsApp celular/web',
+        proxima_acao: 'Atendimento humano iniciado fora do Chatwoot',
+      });
+    } catch (error) {
+      logger.warn(
+        { conversationId: chat.conversationId, error: error.message },
+        'Atendimento externo foi bloqueado para o bot, mas o marcador do Chatwoot falhou',
+      );
+    }
+
+    const text = extractText(message);
+    const options = {
+      messageType: 'outgoing',
+      contentAttributes: {
+        baileys_external_outgoing: true,
+        whatsapp_external_device: true,
+        original_direction: 'outgoing',
+      },
+    };
+    try {
+      await createIncomingMessage(chat.conversationId, message, text, options);
+    } catch (error) {
+      if (!(error instanceof ChatwootRequestError) || error.status !== 404) throw error;
+      delete state.chats[jid];
+      await saveState();
+      chat = await ensureConversation(jid, message.pushName, phoneJid);
+      markHumanManaged(chat);
+      await saveState();
+      await createIncomingMessage(chat.conversationId, message, text, options);
+    }
+    state.historyImported[`${phoneJid}:${message.key.id}`] = messageTimestampSeconds(message);
+    await saveState();
+    logger.info(
+      { jid, conversationId: chat.conversationId },
+      'Mensagem enviada pelo celular/web sincronizada no Chatwoot; chatbot desativado',
+    );
+    await auditEvent('external_outgoing_imported', {
+      conversationId: chat.conversationId,
+      whatsappMessageId: message.key.id,
+      jid: chat.outboundJid || phoneJid,
+      contentLength: text.length,
+      contentSha256: auditHash(text),
+      hasMedia: Boolean(mediaInfo(message)),
+    });
+    return;
+  }
+
   try {
     await createIncomingMessage(chat.conversationId, message, extractText(message));
   } catch (error) {
@@ -1628,9 +1693,20 @@ async function sendAttachment(jid, attachment, caption) {
   }
 }
 
+function rememberGatewayMessageId(messageId) {
+  if (!messageId) return;
+  state.gatewaySentMessageIds ||= {};
+  state.gatewaySentMessageIds[messageId] = Date.now();
+  const persistedIds = Object.keys(state.gatewaySentMessageIds);
+  for (const oldId of persistedIds.slice(0, Math.max(0, persistedIds.length - 2000))) {
+    delete state.gatewaySentMessageIds[oldId];
+  }
+}
+
 function rememberSentMessage(message) {
   if (!message?.key?.id) return;
   sentMessages.set(message.key.id, message);
+  rememberGatewayMessageId(message.key.id);
   if (sentMessages.size > 2000) {
     sentMessages.delete(sentMessages.keys().next().value);
   }
@@ -1672,8 +1748,10 @@ async function sendWhatsAppMessage(jid, content) {
   let lastError;
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const messageId = generateMessageIDV2(socket.user?.id);
+    rememberGatewayMessageId(messageId);
     try {
-      const message = await socket.sendMessage(registeredJid, content);
+      const message = await socket.sendMessage(registeredJid, content, { messageId });
       rememberSentMessage(message);
       if (message?.key?.id) {
         state.historyImported[`${registeredJid}:${message.key.id}`] = Math.floor(Date.now() / 1000);
@@ -1845,6 +1923,7 @@ async function handleChatwootWebhook(payload) {
     payload.private === true ||
     payload.content_attributes?.baileys_bot === true ||
     payload.content_attributes?.baileys_history_import === true ||
+    payload.content_attributes?.baileys_external_outgoing === true ||
     (payloadInboxId > 0 && payloadInboxId !== config.chatwootInboxId)
   ) {
     return { ignored: true };

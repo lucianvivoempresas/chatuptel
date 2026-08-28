@@ -2,6 +2,12 @@ export function isOutgoingMessage(message) {
   return message?.message_type === 'outgoing' || Number(message?.message_type) === 1;
 }
 
+export function isExternalWhatsAppOutgoing(message, gatewayMessageIds = new Set()) {
+  const messageId = message?.key?.id;
+  if (message?.key?.fromMe !== true || !messageId) return false;
+  return !gatewayMessageIds.has(messageId);
+}
+
 function isHumanSender(message) {
   const senderType = String(message?.sender?.type || '').toLowerCase();
   return senderType === 'user';
