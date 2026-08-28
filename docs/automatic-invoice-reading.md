@@ -62,5 +62,22 @@ pela conversa do Chatwoot.
 - Leituras com confiança abaixo de 75% pedem uma imagem melhor.
 - Após duas leituras ilegíveis, a conversa é encaminhada para uma pessoa.
 - Falha de cota/autorização tenta a próxima chave configurada.
+- Erros técnicos de leitura usam o mesmo PDF em até três tentativas. Se todas
+  falharem, o cliente pode informar a conta mensal; o sistema estima o consumo
+  dividindo o valor por R$ 1,09/kWh e apresenta somente o desconto-base da tabela
+  como simulação parcial, sujeita à validação humana.
 - NIS/Tarifa Social, consumo abaixo de 300 kWh e UF fora da tabela nunca são
   reprovados automaticamente: seguem para avaliação humana.
+
+## Reiniciar números de teste
+
+Para reutilizar um telefone exclusivamente de teste sem apagar mensagens ou
+contatos do Chatwoot:
+
+```bash
+./scripts/reset-test-chat.sh 5571999999999
+```
+
+O comando limpa apenas o estado e as travas do assistente para os telefones
+informados. A próxima mensagem `Menu` reinicia a qualificação. Qualquer nova
+participação humana volta a bloquear o bot normalmente.

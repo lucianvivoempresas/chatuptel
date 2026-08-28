@@ -14,6 +14,10 @@ import {
 assert.equal(suppressQualificationBot({}), false);
 assert.equal(suppressQualificationBot({ humanManaged: true }), true);
 assert.equal(suppressQualificationBot({ bot: { handoff: true } }), true);
+assert.equal(
+  suppressQualificationBot({ humanManaged: true, botTestMode: true, bot: { handoff: true } }),
+  false,
+);
 assert.equal(isOutgoingMessage({ message_type: 'outgoing' }), true);
 assert.equal(isOutgoingMessage({ message_type: 1 }), true);
 assert.equal(
@@ -76,11 +80,12 @@ assert.equal(
   null,
 );
 
-const chat = { bot: { stage: 'name', handoff: false } };
+const chat = { botTestMode: true, bot: { stage: 'name', handoff: false } };
 markHumanManaged(chat, '2026-07-29T12:00:00.000Z');
 assert.equal(chat.humanManaged, true);
 assert.equal(chat.bot.handoff, true);
 assert.equal(chat.bot.stage, 'human');
+assert.equal(chat.botTestMode, undefined);
 assert.equal(
   isBotAuthoredMessage({
     sender: { id: 22, type: 'User', name: 'Assistente Uptel Conecta' },

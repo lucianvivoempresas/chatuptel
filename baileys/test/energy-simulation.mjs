@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   averageConsumption,
   baseDiscountFor,
+  estimateEnergyFromMonthlyBill,
   simulateEnergyDiscount,
 } from '../src/energy-simulation.js';
 
@@ -11,6 +12,21 @@ assert.equal(baseDiscountFor('RN', 3000), 22);
 assert.equal(baseDiscountFor('PE', 5000), 30);
 assert.equal(baseDiscountFor('BA', 299.99), null);
 assert.equal(baseDiscountFor('SP', 1000), null);
+
+assert.deepEqual(estimateEnergyFromMonthlyBill({
+  state: 'BA',
+  monthlyBill: 10000,
+  tariffPerKwh: 1.09,
+}), {
+  state: 'BA',
+  monthlyBill: 10000,
+  tariffPerKwh: 1.09,
+  estimatedKwh: 9174.31,
+  discountRate: 25,
+  monthlySavings: 2500,
+  annualSavings: 30000,
+  estimatedBill: 7500,
+});
 
 assert.deepEqual(averageConsumption([812, 958, 1199]), {
   averageKwh: 989.67,

@@ -79,10 +79,13 @@ export function hasPersistentHumanMarker(conversation, botUserId = 0) {
 }
 
 export function suppressQualificationBot(chat) {
+  if (chat?.botTestMode === true) return false;
   return chat?.humanManaged === true || chat?.bot?.handoff === true;
 }
 
 export function markHumanManaged(chat, timestamp = new Date().toISOString()) {
+  delete chat.botTestMode;
+  delete chat.botTestResetAt;
   chat.humanManaged = true;
   chat.humanManagedAt ||= timestamp;
   if (chat.bot) {

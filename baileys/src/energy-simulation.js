@@ -98,6 +98,26 @@ export function averageConsumption(consumptions) {
   };
 }
 
+export function estimateEnergyFromMonthlyBill({ state, monthlyBill, tariffPerKwh = 1.09 }) {
+  const bill = finiteNumber(monthlyBill);
+  const tariff = finiteNumber(tariffPerKwh);
+  if (bill === null || bill <= 0) throw new TypeError('Valor mensal inválido');
+  if (tariff === null || tariff <= 0) throw new TypeError('Tarifa de energia inválida');
+  const estimatedKwh = round(bill / tariff);
+  const discountRate = baseDiscountFor(state, estimatedKwh);
+  const monthlySavings = discountRate === null ? null : round(bill * discountRate / 100);
+  return {
+    state: normalizeState(state),
+    monthlyBill: round(bill),
+    tariffPerKwh: round(tariff),
+    estimatedKwh,
+    discountRate,
+    monthlySavings,
+    annualSavings: monthlySavings === null ? null : round(monthlySavings * 12),
+    estimatedBill: monthlySavings === null ? null : round(bill - monthlySavings),
+  };
+}
+
 function reviewReason(unit) {
   if (unit.lowIncome || unit.hasNis) return 'tarifa_social_ou_nis';
   if (unit.readable === false) return 'fatura_ilegivel';
