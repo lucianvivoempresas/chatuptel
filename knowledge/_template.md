@@ -4,6 +4,9 @@ title: Título do material
 version: 1.0.0
 status: draft
 updated_at: AAAA-MM-DD
+valid_from:
+valid_until:
+source_period: permanente
 products: energia
 states: BA, RN, PE
 tags: palavras, para, busca

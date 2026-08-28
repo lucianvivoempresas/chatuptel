@@ -50,12 +50,33 @@ export function parseKnowledgeDocument(source, filename = 'documento.md') {
     version,
     status,
     updatedAt: clean(metadata.updated_at, 20),
+    validFrom: clean(metadata.valid_from, 20),
+    validUntil: clean(metadata.valid_until, 20),
+    sourcePeriod: clean(metadata.source_period, 30),
     products: list(metadata.products),
     states: list(metadata.states).map(value => value.toUpperCase()),
     tags: list(metadata.tags),
     body: text.slice(closing + 5).trim(),
     filename,
   };
+}
+
+function validDate(value) {
+  return !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+export function knowledgeDocumentState(document, today = new Date().toISOString().slice(0, 10)) {
+  if (document.status !== 'active') return 'draft';
+  if (!validDate(document.validFrom) || !validDate(document.validUntil)) return 'invalid';
+  if (document.validFrom && today < document.validFrom) return 'scheduled';
+  if (document.validUntil && today > document.validUntil) return 'expired';
+  return 'current';
+}
+
+function newestDocument(left, right) {
+  const leftKey = `${left.updatedAt || ''}|${left.version || ''}|${left.filename}`;
+  const rightKey = `${right.updatedAt || ''}|${right.version || ''}|${right.filename}`;
+  return leftKey.localeCompare(rightKey) >= 0 ? left : right;
 }
 
 function splitDocument(document, maxChars = 1400) {
@@ -130,18 +151,24 @@ async function markdownFiles(directory) {
   return files.sort();
 }
 
-export function createKnowledgeBase({ directory, cacheMs = 30000 } = {}) {
-  let cache = { loadedAt: 0, documents: [], chunks: [], errors: [] };
+export function createKnowledgeBase({ directory, cacheMs = 30000, today = () => new Date().toISOString().slice(0, 10) } = {}) {
+  let cache = { loadedAt: 0, documents: [], chunks: [], errors: [], ignored: {} };
 
   async function load(force = false) {
     if (!force && Date.now() - cache.loadedAt < cacheMs) return cache;
-    const documents = [];
+    const candidates = [];
     const errors = [];
+    const ignored = { draft: 0, expired: 0, scheduled: 0, superseded: 0, invalid: 0 };
     try {
       for (const filename of await markdownFiles(directory)) {
         try {
           const document = parseKnowledgeDocument(await readFile(filename, 'utf8'), path.relative(directory, filename));
-          if (document.status === 'active') documents.push(document);
+          const state = knowledgeDocumentState(document, today());
+          if (state === 'current') candidates.push(document);
+          else {
+            ignored[state] += 1;
+            if (state === 'invalid') errors.push(`${document.filename}: validade deve usar AAAA-MM-DD`);
+          }
         } catch (error) {
           errors.push(clean(error.message, 300));
         }
@@ -149,11 +176,21 @@ export function createKnowledgeBase({ directory, cacheMs = 30000 } = {}) {
     } catch (error) {
       errors.push(`Base indisponível: ${clean(error.message, 240)}`);
     }
+    const byId = new Map();
+    for (const document of candidates) {
+      if (!byId.has(document.id)) byId.set(document.id, document);
+      else {
+        byId.set(document.id, newestDocument(byId.get(document.id), document));
+        ignored.superseded += 1;
+      }
+    }
+    const documents = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
     cache = {
       loadedAt: Date.now(),
       documents,
       chunks: documents.flatMap(document => splitDocument(document)),
       errors,
+      ignored,
     };
     return cache;
   }
@@ -175,6 +212,7 @@ export function createKnowledgeBase({ directory, cacheMs = 30000 } = {}) {
         documents: current.documents.length,
         chunks: current.chunks.length,
         errors: current.errors,
+        ignored: current.ignored,
         lastModified,
       };
     },

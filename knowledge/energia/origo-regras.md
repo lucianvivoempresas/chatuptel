@@ -4,6 +4,7 @@ title: Regras de desconto Órigo Energia
 version: 1.0.0
 status: active
 updated_at: 2026-08-28
+source_period: permanente
 products: energia
 states: BA, RN, PE
 tags: desconto, economia, consumo, kwh, fatura, pis, cofins, iluminação pública

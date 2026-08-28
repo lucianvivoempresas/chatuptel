@@ -6,6 +6,7 @@ import {
   createKnowledgeBase,
   formatKnowledgeContext,
   knowledgeSources,
+  knowledgeDocumentState,
   parseKnowledgeDocument,
   rankKnowledgeChunks,
 } from '../src/knowledge-base.js';
@@ -76,11 +77,26 @@ Não aprovado.
   assert.equal(draft.status, 'draft');
 });
 
+test('monthly documents are used only inside their validity window', () => {
+  const monthly = parseKnowledgeDocument(`---
+id: vivo-ofertas
+title: Ofertas Vivo
+status: active
+valid_from: 2026-08-01
+valid_until: 2026-08-31
+---
+Oferta mensal.
+`);
+  assert.equal(knowledgeDocumentState(monthly, '2026-08-28'), 'current');
+  assert.equal(knowledgeDocumentState(monthly, '2026-09-01'), 'expired');
+});
+
 test('versioned repository knowledge loads without errors and ignores template drafts', async () => {
   const base = createKnowledgeBase({ directory: repositoryKnowledge, cacheMs: 0 });
   const status = await base.status();
   assert.equal(status.available, true);
-  assert.equal(status.documents, 3);
+  assert.equal(status.documents, 7);
+  assert.equal(status.ignored.draft, 0);
   assert.deepEqual(status.errors, []);
   const results = await base.search('Qual desconto para 5200 kWh em Pernambuco?');
   assert.equal(results[0].documentId, 'energia-origo-regras');

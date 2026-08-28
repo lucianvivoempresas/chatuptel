@@ -22,6 +22,7 @@ componente foi desenvolvido separadamente para a Uptel Conecta.
 - a base comercial é consultada localmente e mostra ao atendente quais versões
   foram usadas;
 - materiais em rascunho ou inválidos não entram nas sugestões;
+- books mensais vencidos são bloqueados automaticamente;
 - uma falha na base não interfere no Chatwoot, WhatsApp, CRM ou leitura de
   faturas.
 
