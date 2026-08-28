@@ -44,6 +44,11 @@ chmod +x scripts/configure-invoice-reading.sh
 6. O resultado é apresentado ao cliente e salvo nos campos do Chatwoot.
 7. A fila persistente envia o resultado estruturado ao EnergiaVolt.
 
+Se a leitura automática falhar e o atendimento for transferido para uma pessoa,
+o contato e os dados já coletados também são enviados ao CRM como lead parcial.
+Uma simulação concluída posteriormente atualiza a mesma oportunidade, identificada
+pela conversa do Chatwoot.
+
 ## Proteções
 
 - A IA não escolhe descontos e não faz a matemática final.

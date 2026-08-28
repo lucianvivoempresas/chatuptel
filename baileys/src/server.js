@@ -910,6 +910,33 @@ async function enqueueEnergiaCrmSync(chat) {
   if (energiaCrmConfigured()) void flushEnergiaCrmOutbox();
 }
 
+async function enqueueMissingEnergyCrmHandoffs() {
+  const queuedConversations = new Set();
+  let recovered = 0;
+  for (const chat of Object.values(state.chats || {})) {
+    const conversationId = Number(chat?.conversationId || 0);
+    if (
+      !conversationId ||
+      queuedConversations.has(conversationId) ||
+      chat?.bot?.answers?.productKey !== 'energy' ||
+      chat?.bot?.completed === true ||
+      chat?.bot?.handoff !== true ||
+      chat?.crmSync
+    ) {
+      continue;
+    }
+    queuedConversations.add(conversationId);
+    await enqueueEnergiaCrmSync(chat);
+    recovered += 1;
+  }
+  if (recovered > 0) {
+    logger.info(
+      { recovered },
+      'Leads parciais de Energia recuperados para sincronização com o CRM',
+    );
+  }
+}
+
 async function sendEnergiaCrmLead(payload) {
   const response = await fetch(
     `${config.energiaCrmUrl}/api/integrations/chatwoot/leads`,
@@ -1048,6 +1075,7 @@ async function handoffToHuman(chat, jid, message) {
   });
   await assignConversationTeam(chat.conversationId, 'vendas');
   await saveState();
+  await enqueueEnergiaCrmSync(chat);
   await sendBotMessage(
     chat,
     jid,
@@ -2294,6 +2322,7 @@ async function startWhatsApp() {
 }
 
 await loadState();
+await enqueueMissingEnergyCrmHandoffs();
 await cleanOldAuditFiles();
 app.listen(config.port, '0.0.0.0', () => {
   logger.info({ port: config.port }, 'Gateway Baileys iniciado');
