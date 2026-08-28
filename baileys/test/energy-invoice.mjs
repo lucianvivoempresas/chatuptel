@@ -15,6 +15,7 @@ assert.deepEqual(normalizeInvoiceExtraction({
   holderType: 'company',
   consumptions: [{ month: 'jul/26', kwh: 812 }, { month: 'jun/26', kwh: 958 }],
   billTotal: 1207.15,
+  invoiceItemsTotal: null,
   publicLighting: 145.58,
   pisRate: 1.22,
   cofinsRate: 5.62,
@@ -38,6 +39,25 @@ assert.deepEqual(normalizeInvoiceExtraction({
   warnings: [],
 });
 
+const zeroHeaderTotal = normalizeInvoiceExtraction({
+  readable: true,
+  confidence: 0.96,
+  unitId: '20218587',
+  state: 'BA',
+  holderType: 'person',
+  consumptions: [{ month: 'ago/26', kwh: 2466 }],
+  billTotal: 0,
+  invoiceItemsTotal: 3003.56,
+  publicLighting: 60,
+  pisRate: 0.98,
+  cofinsRate: 4.54,
+  hasNis: false,
+  lowIncome: false,
+  warnings: [],
+});
+assert.equal(zeroHeaderTotal.billTotal, 3003.56);
+assert.match(zeroHeaderTotal.warnings[0], /TOTAL A PAGAR estava zerado/);
+
 const requests = [];
 const extracted = await extractEnergyInvoice({
   buffer: Buffer.from('fake-image'),
@@ -57,6 +77,7 @@ const extracted = await extractEnergyInvoice({
         holderType: 'person',
         consumptions: [{ month: 'ago/26', kwh: 500 }],
         billTotal: 600,
+        invoiceItemsTotal: 600,
         publicLighting: 50,
         pisRate: null,
         cofinsRate: null,

@@ -39,6 +39,8 @@ chmod +x scripts/configure-invoice-reading.sh
 2. Envia uma fatura por unidade, em PDF ou imagem.
 3. O Gemini extrai UF, até seis consumos, total, iluminação pública,
    PIS/COFINS e indicadores de Tarifa Social/NIS.
+   Quando o campo principal `TOTAL A PAGAR` estiver zerado, o sistema usa o
+   `TOTAL` positivo exibido ao final da tabela de itens/serviços da fatura.
 4. O cliente pode enviar outras unidades ou digitar `CALCULAR`.
 5. O motor determinístico separa as unidades por UF e calcula a simulação.
 6. O resultado é apresentado ao cliente e salvo nos campos do Chatwoot.

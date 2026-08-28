@@ -19,6 +19,7 @@ const EXTRACTION_SCHEMA = {
       },
     },
     billTotal: { type: 'NUMBER', nullable: true },
+    invoiceItemsTotal: { type: 'NUMBER', nullable: true },
     publicLighting: { type: 'NUMBER', nullable: true },
     pisRate: { type: 'NUMBER', nullable: true },
     cofinsRate: { type: 'NUMBER', nullable: true },
@@ -34,6 +35,7 @@ const EXTRACTION_SCHEMA = {
     'holderType',
     'consumptions',
     'billTotal',
+    'invoiceItemsTotal',
     'publicLighting',
     'pisRate',
     'cofinsRate',
@@ -52,7 +54,10 @@ Extraia:
 - UF da unidade;
 - tipo do titular: pessoa, empresa ou desconhecido;
 - até os 6 consumos mensais mais recentes em kWh, do mais recente para o mais antigo;
-- valor total atual da fatura;
+- valor total atual da fatura. Extraia em billTotal o campo principal "TOTAL A PAGAR";
+- total dos itens/serviços da fatura em invoiceItemsTotal. Procure especialmente a linha "TOTAL"
+  ao final da tabela de itens. Quando "TOTAL A PAGAR" for R$ 0,00 mas o total dos itens for
+  positivo, invoiceItemsTotal deve conter esse valor positivo, pois será usado na simulação;
 - contribuição/taxa de iluminação pública. Use 0 somente se estiver claro que a cobrança não existe;
 - alíquotas percentuais de PIS e COFINS, não os valores monetários. Se não constarem, use null;
 - presença de NIS, Tarifa Social, Baixa Renda ou classificação equivalente.
@@ -85,7 +90,10 @@ export function normalizeInvoiceExtraction(payload) {
     .filter(item => item.kwh !== null)
     .slice(0, 6);
   const state = cleanText(payload?.state, 2).toUpperCase();
-  const billTotal = finiteOrNull(payload?.billTotal);
+  const statedBillTotal = finiteOrNull(payload?.billTotal);
+  const invoiceItemsTotal = finiteOrNull(payload?.invoiceItemsTotal);
+  const usedItemsTotal = statedBillTotal === 0 && Number(invoiceItemsTotal) > 0;
+  const billTotal = usedItemsTotal ? invoiceItemsTotal : statedBillTotal;
   const publicLighting = finiteOrNull(payload?.publicLighting);
   const confidence = finiteOrNull(payload?.confidence, { min: 0, max: 1 }) ?? 0;
   const criticalFieldsPresent = /^[A-Z]{2}$/.test(state)
@@ -109,7 +117,12 @@ export function normalizeInvoiceExtraction(payload) {
     cofinsRate: finiteOrNull(payload?.cofinsRate, { min: 0, max: 100 }),
     hasNis: Boolean(payload?.hasNis),
     lowIncome: Boolean(payload?.lowIncome),
-    warnings: (Array.isArray(payload?.warnings) ? payload.warnings : [])
+    warnings: [
+      ...(Array.isArray(payload?.warnings) ? payload.warnings : []),
+      ...(usedItemsTotal
+        ? ['TOTAL A PAGAR estava zerado; utilizado o TOTAL dos itens da fatura.']
+        : []),
+    ]
       .map(item => cleanText(item, 240))
       .filter(Boolean)
       .slice(0, 10),

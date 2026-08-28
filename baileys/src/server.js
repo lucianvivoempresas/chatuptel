@@ -1409,8 +1409,20 @@ async function handleIncoming(message) {
     processedMessages.delete(processedMessages.values().next().value);
   }
 
-  const phoneJid =
-    message.key.remoteJidAlt?.endsWith('@s.whatsapp.net') ? message.key.remoteJidAlt : jid;
+  let phoneJid =
+    message.key.remoteJidAlt?.endsWith('@s.whatsapp.net') ? message.key.remoteJidAlt : null;
+  if (!phoneJid && jid.endsWith('@lid')) {
+    let mappedPn = historyLidToPn.get(jid);
+    if (!mappedPn) {
+      try {
+        mappedPn = await socket?.signalRepository?.lidMapping?.getPNForLID(jid);
+      } catch (error) {
+        logger.warn({ jid, error: error.message }, 'Mapeamento LID indisponível para a mensagem');
+      }
+    }
+    phoneJid = phoneJidFromValue(mappedPn);
+  }
+  phoneJid ||= jid;
   let chat = await ensureConversation(jid, message.pushName, phoneJid);
 
   if (externalOutgoing) {
@@ -1596,7 +1608,6 @@ async function importHistoryChunk({
   syncType,
   isLatest,
 }) {
-  if (config.historySyncDays <= 0) return;
   for (const mapping of lidPnMappings) {
     if (mapping.lid && mapping.pn) historyLidToPn.set(mapping.lid, mapping.pn);
   }
@@ -1604,6 +1615,7 @@ async function importHistoryChunk({
     if (contact.id) historyContacts.set(contact.id, contact);
     if (contact.lid) historyContacts.set(contact.lid, contact);
   }
+  if (config.historySyncDays <= 0) return;
 
   state.historyStats.startedAt ||= new Date().toISOString();
   state.historyStats.received = Number(state.historyStats.received || 0) + messages.length;
@@ -2268,7 +2280,10 @@ async function startWhatsApp() {
     browser: Browsers.macOS('Desktop'),
     markOnlineOnConnect: false,
     syncFullHistory: config.historySyncDays > 0,
-    shouldSyncHistoryMessage: () => config.historySyncDays > 0,
+    // O sync inicial fornece os mapeamentos LID -> telefone usados em mensagens
+    // de contatos novos. O importador abaixo continua descartando o histórico
+    // quando WHATSAPP_HISTORY_SYNC_DAYS=0.
+    shouldSyncHistoryMessage: () => true,
     generateHighQualityLinkPreview: false,
     getMessage: async (key) => sentMessages.get(key.id)?.message,
   });
@@ -2285,9 +2300,18 @@ async function startWhatsApp() {
     state.historyStats.statusUpdatedAt = new Date().toISOString();
     void saveState();
   });
+  socket.ev.on('lid-mapping.update', ({ lid, pn }) => {
+    if (lid && pn) historyLidToPn.set(lid, pn);
+  });
   socket.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
+    if (!['notify', 'append'].includes(type)) return;
     for (const message of messages) {
+      if (
+        type === 'append'
+        && messageTimestampSeconds(message) < Math.floor(Date.now() / 1000) - 120
+      ) {
+        continue;
+      }
       try {
         await handleIncoming(message);
       } catch (error) {
