@@ -28,7 +28,11 @@ import {
 } from './bot-policy.js';
 import { agentNameFromPayload, formatAgentMessage } from './message-format.js';
 import { estimateEnergyFromMonthlyBill, simulateEnergyDiscount } from './energy-simulation.js';
-import { extractEnergyInvoice, parseGeminiApiKeys } from './energy-invoice.js';
+import {
+  extractEnergyInvoice,
+  extractEnergyInvoiceWithOpenAI,
+  parseGeminiApiKeys,
+} from './energy-invoice.js';
 import {
   MENU_TEXT,
   PRODUCT_OPTIONS,
@@ -80,6 +84,12 @@ const config = {
     process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '',
   ),
   geminiModel: String(process.env.GEMINI_INVOICE_MODEL || 'gemini-2.5-flash').trim(),
+  openAiApiKey: String(process.env.OPENAI_API_KEY || '').trim(),
+  openAiInvoiceModel: String(process.env.OPENAI_INVOICE_MODEL || 'gpt-4.1-mini').trim(),
+  openAiInvoiceMaxOutputTokens: Math.max(200, Math.min(1500, positiveNumber(
+    process.env.OPENAI_INVOICE_MAX_OUTPUT_TOKENS,
+    800,
+  ))),
   energyInvoiceMaxBytes: Math.max(1024 * 1024, positiveNumber(
     process.env.ENERGY_INVOICE_MAX_BYTES,
     15 * 1024 * 1024,
@@ -1176,6 +1186,38 @@ async function analyzeEnergyInvoice(chat, jid, incomingMedia) {
     }
   }
 
+  if (!invoice && config.openAiApiKey) {
+    await sendBotMessage(
+      chat,
+      jid,
+      'As 3 tentativas do leitor principal falharam. Vou fazer uma última leitura de contingência usando o mesmo arquivo.',
+    );
+    try {
+      invoice = await extractEnergyInvoiceWithOpenAI({
+        buffer: incomingMedia.buffer,
+        mimeType: incomingMedia.mimeType,
+        apiKey: config.openAiApiKey,
+        model: config.openAiInvoiceModel,
+        maxOutputTokens: config.openAiInvoiceMaxOutputTokens,
+      });
+      bot.energyReadErrors = 0;
+      logger.info(
+        { conversationId: chat.conversationId, provider: invoice.provider },
+        'Leitura de contingência da fatura concluída',
+      );
+    } catch (error) {
+      logger.warn(
+        {
+          conversationId: chat.conversationId,
+          provider: 'openai',
+          status: error.status,
+          error: error.message,
+        },
+        'Falha na leitura de contingência da fatura',
+      );
+    }
+  }
+
   if (!invoice) {
     bot.stage = 'energy_fallback_value';
     await saveState();
@@ -2263,6 +2305,11 @@ app.get('/status', (request, response) => {
       lastPollAt: chatwootPollLastAt,
       lastError: chatwootPollLastError,
     },
+    invoiceReading: {
+      geminiConfigured: config.geminiApiKeys.length > 0,
+      openAiFallbackConfigured: Boolean(config.openAiApiKey),
+      openAiModel: config.openAiInvoiceModel,
+    },
   });
 });
 
@@ -2294,6 +2341,13 @@ app.get('/operations/status', (request, response) => {
       keyCount: config.geminiApiKeys.length,
       model: config.geminiModel,
       maxBytes: config.energyInvoiceMaxBytes,
+      openAiFallback: {
+        configured: Boolean(config.openAiApiKey),
+        model: config.openAiInvoiceModel,
+        maxOutputTokens: config.openAiInvoiceMaxOutputTokens,
+        triggerAfterGeminiFailures: 3,
+        attemptsPerInvoice: 1,
+      },
     },
     chatwootOutboundRecovery: {
       lastPollAt: chatwootPollLastAt,

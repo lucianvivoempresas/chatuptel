@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   extractEnergyInvoice,
+  extractEnergyInvoiceWithOpenAI,
   normalizeInvoiceExtraction,
   parseGeminiApiKeys,
 } from '../src/energy-invoice.js';
@@ -93,5 +94,40 @@ assert.equal(requests[0].headers['x-goog-api-key'], 'exhausted');
 assert.equal(requests[1].headers['x-goog-api-key'], 'working');
 assert.equal(extracted.state, 'PE');
 assert.equal(extracted.keySlot, 2);
+
+let openAiRequest;
+const openAiExtracted = await extractEnergyInvoiceWithOpenAI({
+  buffer: Buffer.from('fake-pdf'),
+  mimeType: 'application/pdf',
+  apiKey: 'sk-test-only',
+  fetchImpl: async (_url, options) => {
+    openAiRequest = JSON.parse(options.body);
+    return new Response(JSON.stringify({
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify({
+        readable: true,
+        confidence: 0.93,
+        unitId: 'UC-OPENAI',
+        state: 'RN',
+        holderType: 'company',
+        consumptions: [{ month: 'ago/26', kwh: 1200 }],
+        billTotal: 1500,
+        invoiceItemsTotal: 1500,
+        publicLighting: 100,
+        pisRate: 1,
+        cofinsRate: 4,
+        hasNis: false,
+        lowIncome: false,
+        warnings: [],
+      }) }] }],
+    }), { status: 200 });
+  },
+});
+assert.equal(openAiRequest.model, 'gpt-4.1-mini');
+assert.equal(openAiRequest.store, false);
+assert.equal(openAiRequest.max_output_tokens, 800);
+assert.equal(openAiRequest.input[0].content[1].type, 'input_file');
+assert.equal(openAiRequest.text.format.strict, true);
+assert.equal(openAiExtracted.provider, 'openai');
+assert.equal(openAiExtracted.state, 'RN');
 
 console.log('energy-invoice: ok');

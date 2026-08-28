@@ -11,6 +11,9 @@ No `.env` do Chatwoot:
 ```env
 GEMINI_API_KEYS=chave-do-projeto-1,chave-do-projeto-2
 GEMINI_INVOICE_MODEL=gemini-2.5-flash
+OPENAI_API_KEY=chave-do-projeto-openai
+OPENAI_INVOICE_MODEL=gpt-4.1-mini
+OPENAI_INVOICE_MAX_OUTPUT_TOKENS=800
 ENERGY_INVOICE_MAX_BYTES=15728640
 ```
 
@@ -31,6 +34,13 @@ Como alternativa, configure sem exibir a chave no terminal:
 ```bash
 chmod +x scripts/configure-invoice-reading.sh
 ./scripts/configure-invoice-reading.sh
+```
+
+Para cadastrar a chave OpenAI com entrada oculta e habilitar a contingência:
+
+```bash
+chmod +x scripts/configure-openai-invoice-reading.sh
+./scripts/configure-openai-invoice-reading.sh
 ```
 
 ## Fluxo
@@ -62,8 +72,11 @@ pela conversa do Chatwoot.
 - Leituras com confiança abaixo de 75% pedem uma imagem melhor.
 - Após duas leituras ilegíveis, a conversa é encaminhada para uma pessoa.
 - Falha de cota/autorização tenta a próxima chave configurada.
-- Erros técnicos de leitura usam o mesmo PDF em até três tentativas. Se todas
-  falharem, o cliente pode informar a conta mensal; o sistema estima o consumo
+- Erros técnicos de leitura usam o mesmo PDF em até três tentativas no Gemini.
+  Se todas falharem, ocorre uma única tentativa de contingência na OpenAI. A
+  contingência usa modelo econômico, resposta JSON limitada e `store=false`.
+  Somente se os dois provedores falharem, o cliente pode informar a conta mensal;
+  o sistema estima o consumo
   dividindo o valor por R$ 1,09/kWh e apresenta somente o desconto-base da tabela
   como simulação parcial, sujeita à validação humana.
 - NIS/Tarifa Social, consumo abaixo de 300 kWh e UF fora da tabela nunca são
