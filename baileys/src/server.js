@@ -257,7 +257,21 @@ function phoneJidFromValue(value) {
 function contactFromResponse(response) {
   const payload = response?.payload;
   if (Array.isArray(payload)) return payload[0] || null;
+  if (payload?.contact) {
+    const contact = payload.contact;
+    contact.contact_inboxes = Array.isArray(contact.contact_inboxes)
+      ? contact.contact_inboxes
+      : [];
+    if (payload.contact_inbox && !contact.contact_inboxes.some(contactInboxMatches)) {
+      contact.contact_inboxes.push(payload.contact_inbox);
+    }
+    return contact;
+  }
   return payload || response || null;
+}
+
+function contactInboxMatches(item) {
+  return Number(item?.inbox?.id || item?.inbox_id || 0) === config.chatwootInboxId;
 }
 
 async function searchContact(query, identifier, phoneNumber) {
@@ -304,9 +318,7 @@ async function ensureWhatsAppLeadOrigin(contact) {
 }
 
 async function ensureContactInbox(contact, preferredSourceId) {
-  let contactInbox = contact.contact_inboxes?.find(
-    (item) => Number(item.inbox?.id) === config.chatwootInboxId,
-  );
+  let contactInbox = contact.contact_inboxes?.find(contactInboxMatches);
   if (contactInbox) return contactInbox;
 
   try {
@@ -328,9 +340,7 @@ async function ensureContactInbox(contact, preferredSourceId) {
         `/api/v1/accounts/${config.chatwootAccountId}/contacts/${contact.id}`,
       ),
     );
-    contactInbox = refreshed?.contact_inboxes?.find(
-      (item) => Number(item.inbox?.id) === config.chatwootInboxId,
-    );
+    contactInbox = refreshed?.contact_inboxes?.find(contactInboxMatches);
     if (!contactInbox) throw error;
     return contactInbox;
   }
