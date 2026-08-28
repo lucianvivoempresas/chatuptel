@@ -2048,7 +2048,10 @@ async function pollChatwootHumanMessages() {
       : response?.data?.payload || response?.payload || [];
 
     for (const conversation of conversations) {
-      const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+      const messages = [
+        ...(Array.isArray(conversation?.messages) ? conversation.messages : []),
+        conversation?.last_non_activity_message,
+      ].filter(Boolean);
       for (const message of messages) {
         const messageId = String(message?.id || '');
         if (!messageId || observedChatwootMessages.has(messageId)) continue;
@@ -2104,6 +2107,10 @@ app.get('/status', (request, response) => {
     qrAvailable: Boolean(currentQr),
     pendingOutbound: Object.keys(state.outboundQueue || {}).length,
     pendingCrmSync: Object.keys(state.crmOutbox || {}).length,
+    chatwootOutboundRecovery: {
+      lastPollAt: chatwootPollLastAt,
+      lastError: chatwootPollLastError,
+    },
   });
 });
 
