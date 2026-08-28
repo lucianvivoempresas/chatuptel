@@ -267,6 +267,11 @@ sudo ./deploy/install-assistant.sh
 Antes, configure `ZYLOO_API_KEY` somente no `.env` do servidor. Consulte
 `docs/assistant-uptel.md` para instalação, segurança e diagnóstico.
 
+O copiloto também consulta uma base comercial local, versionada e somente
+leitura. As fontes usadas aparecem no painel e conteúdos em rascunho são
+ignorados. Consulte `docs/sdr-knowledge-base.md`. Esta primeira etapa não ativa
+respostas autônomas no WhatsApp.
+
 ## Atualizar o Chatwoot
 
 Para atualizar uma instalação existente da versão 4.9.2 Community para a

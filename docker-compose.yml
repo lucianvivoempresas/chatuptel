@@ -150,11 +150,16 @@ services:
       ZYLOO_MODEL: ${ZYLOO_MODEL:-zyloo/gpt-4.1}
       ZYLOO_MAX_TOKENS: ${ZYLOO_MAX_TOKENS:-700}
       ASSISTANT_RATE_LIMIT_PER_MINUTE: ${ASSISTANT_RATE_LIMIT_PER_MINUTE:-20}
+      KNOWLEDGE_BASE_DIR: ${KNOWLEDGE_BASE_DIR:-/app/knowledge}
     ports:
       # O navegador acessa pelo Nginx; a porta permanece privada no servidor.
       - "127.0.0.1:3002:3002"
     networks:
       - app
+    volumes:
+      # Conteúdo comercial versionado e somente leitura. Atualizações de texto
+      # não reiniciam nem modificam o Chatwoot ou o gateway do WhatsApp.
+      - ./knowledge:/app/knowledge:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s

@@ -19,6 +19,11 @@ componente foi desenvolvido separadamente para a Uptel Conecta.
 - o serviço confirma o acesso do usuário consultando a conversa pela API do
   próprio Chatwoot;
 - há limite de requisições por usuário e conta.
+- a base comercial é consultada localmente e mostra ao atendente quais versões
+  foram usadas;
+- materiais em rascunho ou inválidos não entram nas sugestões;
+- uma falha na base não interfere no Chatwoot, WhatsApp, CRM ou leitura de
+  faturas.
 
 ## Instalação
 
@@ -64,7 +69,8 @@ docker compose logs --tail=100 assistant
 curl -s http://127.0.0.1:3002/health
 ```
 
-O endpoint saudável responde `status: ok`. `zylooConfigured: false` indica que
+O endpoint saudável responde `status: ok` e `knowledge.available: true`.
+`zylooConfigured: false` indica que
 a chave não foi carregada; corrija o `.env` e recrie o serviço:
 
 ```bash
