@@ -13,8 +13,8 @@ read_env() {
   sed -n "s/^${1}=//p" .env | tail -n 1 | sed 's/^"//;s/"$//'
 }
 
-if [ -z "$(read_env ZYLOO_API_KEY)" ]; then
-  echo "Erro: adicione ZYLOO_API_KEY ao .env antes de instalar." >&2
+if [ -z "$(read_env OPENAI_API_KEY)" ] && [ -z "$(read_env ZYLOO_API_KEY)" ]; then
+  echo "Erro: configure OPENAI_API_KEY ou ZYLOO_API_KEY no .env antes de instalar." >&2
   echo "A chave não deve ser enviada ao GitHub nem colada em comandos do histórico." >&2
   exit 1
 fi

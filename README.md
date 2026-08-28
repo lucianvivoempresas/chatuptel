@@ -257,7 +257,8 @@ conversa sob demanda, sugere respostas, resume o atendimento e possui um chat
 interno para o agente. A resposta somente é inserida no editor; o envio sempre
 depende da revisão e do clique do atendente.
 
-Esse componente usa a API da Zyloo e não tenta liberar o Captain proprietário
+Esse componente usa por padrão a API direta da OpenAI, mantendo a Zyloo apenas
+como compatibilidade, e não tenta liberar o Captain proprietário
 do Chatwoot. Instale com:
 
 ```bash

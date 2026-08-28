@@ -44,6 +44,7 @@ import {
   parsePositiveInteger,
   parseProduct,
 } from './qualification.js';
+import { refreshSdrMemory, sdrMemoryStats } from './sdr-memory.js';
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -102,6 +103,18 @@ const config = {
   historySyncDays: Math.max(
     0,
     Math.min(30, Number(process.env.WHATSAPP_HISTORY_SYNC_DAYS || 0)),
+  ),
+  sdrAiMaxCallsPerConversation: Math.max(
+    1,
+    Number(process.env.SDR_AI_MAX_CALLS_PER_CONVERSATION || 12),
+  ),
+  sdrAiMaxTokensPerConversation: Math.max(
+    1000,
+    Number(process.env.SDR_AI_MAX_TOKENS_PER_CONVERSATION || 60000),
+  ),
+  sdrAiMaxCostUsdPerConversation: Math.max(
+    0.001,
+    Number(process.env.SDR_AI_MAX_COST_USD_PER_CONVERSATION || 0.05),
   ),
 };
 
@@ -176,6 +189,7 @@ async function loadState() {
 
 async function saveState() {
   const write = async () => {
+    for (const chat of Object.values(state.chats || {})) refreshSdrMemory(chat?.bot);
     await fs.mkdir(path.dirname(config.stateFile), { recursive: true });
     const temporary = `${config.stateFile}.tmp`;
     await fs.writeFile(temporary, JSON.stringify(state, null, 2));
@@ -697,12 +711,14 @@ async function assignConversationAgent(conversationId, agentId) {
 }
 
 function newBotState() {
-  return {
+  const bot = {
     stage: 'product',
     answers: {},
     handoff: false,
     completed: false,
   };
+  refreshSdrMemory(bot);
+  return bot;
 }
 
 async function energyInvoiceMedia(message) {
@@ -2316,6 +2332,8 @@ app.get('/status', (request, response) => {
 app.get('/operations/status', (request, response) => {
   if (!authorized(request)) return response.status(401).json({ error: 'NÃ£o autorizado' });
   const outbound = Object.values(state.outboundQueue || {});
+  const memory = sdrMemoryStats(state.chats);
+  memory.estimatedCostUsd = Number(memory.estimatedCostUsd.toFixed(8));
   return response.json({
     connection: connectionStatus,
     connectedNumber: socket?.user?.id || null,
@@ -2347,6 +2365,16 @@ app.get('/operations/status', (request, response) => {
         maxOutputTokens: config.openAiInvoiceMaxOutputTokens,
         triggerAfterGeminiFailures: 3,
         attemptsPerInvoice: 1,
+      },
+    },
+    sdrMemory: {
+      ...memory,
+      storesRawMessages: false,
+      storesInvoiceFiles: false,
+      limitsPerConversation: {
+        calls: config.sdrAiMaxCallsPerConversation,
+        tokens: config.sdrAiMaxTokensPerConversation,
+        estimatedCostUsd: config.sdrAiMaxCostUsdPerConversation,
       },
     },
     chatwootOutboundRecovery: {

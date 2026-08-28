@@ -14,6 +14,8 @@ orienta o atendente a validar informações não encontradas.
 - arquivos com `status: draft` nunca entram nas respostas;
 - fontes e versões consultadas aparecem no painel;
 - regras comerciais ausentes devem ser encaminhadas para validação humana.
+- o contexto usa memória estruturada e somente as 6 mensagens mais recentes;
+- o PDF e o histórico completo não são copiados para a memória do SDR.
 
 ## Estrutura
 
@@ -89,6 +91,6 @@ quantos materiais vencidos foram bloqueados.
 
 ## Próxima fase
 
-Depois da homologação com atendentes, a mesma busca poderá alimentar o SDR no
-WhatsApp. Essa ativação será separada e possuirá chave de desligamento própria;
-nenhuma resposta autônoma será habilitada nesta etapa.
+A memória econômica e os limites do futuro SDR no WhatsApp já estão preparados.
+A ativação de respostas autônomas continuará separada e possuirá chave de
+desligamento própria; nenhuma resposta autônoma é habilitada nesta etapa.

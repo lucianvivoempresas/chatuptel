@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildZylooPayload,
+  buildOpenAiPayload,
   catalogPriceFallback,
   chooseZylooModel,
   extractJsonObject,
@@ -36,6 +37,15 @@ test('buildZylooPayload uses the documented request format and output limit', ()
   assert.equal(payload.model, 'zyloo/gpt-4.1');
   assert.equal(payload.max_tokens, 700);
   assert.deepEqual(Object.keys(payload).sort(), ['max_tokens', 'messages', 'model']);
+});
+
+test('buildOpenAiPayload uses a small output budget and low reasoning', () => {
+  const messages = [{ role: 'user', content: 'Olá' }];
+  const payload = buildOpenAiPayload(messages, 'gpt-5.6-luna');
+  assert.equal(payload.model, 'gpt-5.6-luna');
+  assert.equal(payload.max_completion_tokens, 450);
+  assert.equal(payload.reasoning_effort, 'low');
+  assert.deepEqual(payload.messages, messages);
 });
 
 test('chooseZylooModel migrates the retired free alias', () => {

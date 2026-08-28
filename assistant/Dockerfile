@@ -5,6 +5,8 @@ COPY package.json ./
 COPY src ./src
 COPY public ./public
 
+RUN mkdir -p /data && chown node:node /data
+
 ENV NODE_ENV=production
 USER node
 EXPOSE 3002

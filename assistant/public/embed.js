@@ -26,7 +26,7 @@
     </style>
     <button class="launcher hidden" type="button" aria-label="Abrir Assistente Uptel" title="Assistente Uptel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l1.5 5.2L19 9l-5.5 1.8L12 16l-1.5-5.2L5 9l5.5-1.8L12 2Z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/></svg></button><span class="launcher-label">Assistente Uptel</span>
     <aside class="drawer" aria-label="Assistente Uptel">
-      <header class="header"><div class="title-row"><div><div class="title">Assistente Uptel</div><div class="subtitle">Copiloto de atendimento</div></div><button class="close" aria-label="Fechar">×</button></div><div class="badge"><span class="dot"></span><span class="status-text">Verificando Zyloo…</span></div></header>
+      <header class="header"><div class="title-row"><div><div class="title">Assistente Uptel</div><div class="subtitle">Copiloto de atendimento</div></div><button class="close" aria-label="Fechar">×</button></div><div class="badge"><span class="dot"></span><span class="status-text">Verificando IA…</span></div></header>
       <nav class="tabs"><button class="tab active" data-tab="suggestions">Sugestões</button><button class="tab" data-tab="chat">Chat</button></nav>
       <main class="body"><section class="suggestions-view"></section><section class="chat-view hidden"><div class="chat-log"><div class="bubble ai">Faça uma pergunta interna sobre a conversa. Nada será enviado ao cliente.</div></div><form class="chat-form"><textarea maxlength="2000" placeholder="Ex.: resuma o pedido e indique o próximo passo"></textarea><button class="btn primary" type="submit">Perguntar ao Assistente</button></form></section></main>
       <footer class="footer">A resposta só será enviada após aprovação do atendente.</footer>
@@ -147,7 +147,8 @@
       const response = await fetch(`${BASE}/api/status`, { credentials:'same-origin' });
       const status = await response.json();
       const ready = status.configured && status.knowledge?.available;
-      $('.status-text').textContent = ready ? `Zyloo + Base SDR (${status.knowledge.documents})` : status.configured ? 'Zyloo configurado · Base vazia' : 'Zyloo não configurado';
+      const provider = status.provider === 'openai' ? 'OpenAI' : status.provider === 'zyloo' ? 'Zyloo' : 'IA';
+      $('.status-text').textContent = ready ? `${provider} + Base SDR (${status.knowledge.documents})` : status.configured ? `${provider} configurado · Base vazia` : `${provider} não configurado`;
       $('.dot').classList.toggle('off', !ready);
     } catch { $('.status-text').textContent = 'Assistente indisponível'; $('.dot').classList.add('off'); }
   }

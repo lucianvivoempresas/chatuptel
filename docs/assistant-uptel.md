@@ -1,66 +1,70 @@
 # Assistente Uptel
 
 O Assistente Uptel é um copiloto interno integrado à tela de conversas do
-Chatwoot Community. Ele usa a API compatível da Zyloo para analisar a conversa
-aberta, sugerir uma resposta e responder perguntas internas do atendente.
+Chatwoot Community. Por padrão ele usa diretamente a API da OpenAI com o modelo
+`gpt-5.6-luna`. A integração antiga com a Zyloo permanece apenas como opção de
+compatibilidade.
 
 Ele não é o Captain oficial do Chatwoot e não libera recursos Enterprise. O
 componente foi desenvolvido separadamente para a Uptel Conecta.
 
-## Comportamento seguro
+## Comportamento seguro e econômico
 
 - a análise só começa quando o atendente clica em **Analisar conversa**;
 - nenhuma resposta é enviada automaticamente;
 - **Inserir no campo** apenas preenche o editor do Chatwoot;
 - o atendente ainda precisa revisar e clicar em **Enviar**;
 - notas privadas não são encaminhadas ao modelo;
-- somente as 16 mensagens textuais mais recentes são usadas;
-- a chave Zyloo permanece no contêiner e nunca chega ao navegador;
-- o serviço confirma o acesso do usuário consultando a conversa pela API do
-  próprio Chatwoot;
-- há limite de requisições por usuário e conta.
-- a base comercial é consultada localmente e mostra ao atendente quais versões
-  foram usadas;
-- materiais em rascunho ou inválidos não entram nas sugestões;
-- books mensais vencidos são bloqueados automaticamente;
-- uma falha na base não interfere no Chatwoot, WhatsApp, CRM ou leitura de
-  faturas.
+- somente as 6 mensagens textuais mais recentes, limitadas a 800 caracteres
+  cada, são usadas;
+- fatos comerciais estruturados sobrevivem sem reenviar todo o histórico;
+- a busca local envia no máximo 3 trechos relevantes e 3.500 caracteres;
+- a resposta do modelo é limitada a 450 tokens, com raciocínio `low`;
+- há teto de 20 chamadas, 80 mil tokens e US$ 0,05 por conversa;
+- consumo e custo estimado são persistidos em volume separado;
+- a chave permanece no contêiner e nunca chega ao navegador ou ao GitHub;
+- o serviço confirma o acesso consultando a conversa pela API do Chatwoot;
+- materiais em rascunho, inválidos ou vencidos não entram nas sugestões;
+- uma falha da IA ou da base não interfere no Chatwoot, WhatsApp, CRM ou
+  leitura de faturas.
 
-## Instalação
+## Configuração
 
-No servidor, adicione a chave ao arquivo `/opt/voltconect-chat/.env`:
+O projeto reutiliza a `OPENAI_API_KEY` já configurada no arquivo
+`/opt/voltconect-chat/.env`. Não copie a chave para o código ou para o GitHub.
 
 ```dotenv
-ZYLOO_API_KEY=valor-secreto
-ZYLOO_BASE_URL=https://api.zyloo.io/v1
-ZYLOO_MODEL=zyloo/gpt-4.1
-ZYLOO_MAX_TOKENS=700
-ASSISTANT_RATE_LIMIT_PER_MINUTE=20
+ASSISTANT_AI_PROVIDER=openai
+ASSISTANT_AI_BASE_URL=https://api.openai.com/v1
+ASSISTANT_AI_MODEL=gpt-5.6-luna
+ASSISTANT_AI_MAX_OUTPUT_TOKENS=450
+ASSISTANT_AI_REASONING_EFFORT=low
+ASSISTANT_MAX_CONTEXT_MESSAGES=6
+ASSISTANT_MAX_MESSAGE_CHARS=800
+ASSISTANT_KNOWLEDGE_MAX_RESULTS=3
+ASSISTANT_KNOWLEDGE_MAX_CHARS=3500
+ASSISTANT_MAX_AI_CALLS_PER_CONVERSATION=20
+ASSISTANT_MAX_AI_TOKENS_PER_CONVERSATION=80000
+ASSISTANT_MAX_AI_COST_USD_PER_CONVERSATION=0.05
 ```
 
-O modelo antigo `zyloo/gpt-4.1-free` foi retirado do catálogo. O serviço
-consulta `/models` antes da primeira análise, mantém a seleção em cache por 15
-minutos e migra automaticamente esse nome antigo para `zyloo/gpt-4.1`. O modelo
-substituto pode consumir o saldo ou os créditos promocionais da conta Zyloo.
-O limite de 700 tokens controla o custo máximo de cada resposta. Um retorno
-HTTP 402 significa que o saldo disponível na carteira Zyloo não é suficiente.
+Se `OPENAI_API_KEY` não estiver disponível e houver uma `ZYLOO_API_KEY`, o
+serviço usa a Zyloo em modo de compatibilidade. Isso não é alternância de
+créditos durante uma conversa: a escolha é feita quando o contêiner inicia.
 
-Não envie o `.env` ao GitHub. Depois execute:
+## Instalação
 
 ```bash
 cd /opt/voltconect-chat
 git pull --ff-only origin main
-chmod +x deploy/install-assistant.sh
-sudo ./deploy/install-assistant.sh
+docker compose build assistant
+docker compose run --rm --no-deps assistant npm test
+docker compose up -d --no-deps assistant
 ```
 
 Atualize o Chatwoot com `Ctrl+F5`, abra uma conversa e clique no botão com
-brilho na lateral direita.
-
-Em telas com pelo menos 1180 pixels de largura, o Chatwoot é redimensionado
-enquanto o painel estiver aberto, mantendo a conversa e o editor visíveis. Em
-telas menores, o painel funciona como uma gaveta sobreposta e pode ser fechado
-no botão `×`.
+brilho na lateral direita. Essa publicação recria somente o assistente; Rails,
+Sidekiq, Baileys, PostgreSQL, Redis e CRM não são reiniciados.
 
 ## Diagnóstico
 
@@ -70,16 +74,13 @@ docker compose logs --tail=100 assistant
 curl -s http://127.0.0.1:3002/health
 ```
 
-O endpoint saudável responde `status: ok` e `knowledge.available: true`.
-`zylooConfigured: false` indica que
-a chave não foi carregada; corrija o `.env` e recrie o serviço:
+O endpoint saudável responde `status: ok`, `configured: true`,
+`provider: openai` e `knowledge.available: true`. O bloco `usage` mostra
+chamadas, tokens e custo estimado sem expor o conteúdo das conversas. O endpoint
+`/uptel-assistant/api/status` também mostra os limites por conversa.
 
-```bash
-docker compose up -d --force-recreate assistant
-```
-
-Uma falha da Zyloo não interfere no WhatsApp, no Chatwoot ou no CRM: apenas o
-painel do assistente fica temporariamente indisponível.
+Uma falha do provedor não interfere no WhatsApp, no Chatwoot ou no CRM: apenas
+o painel do assistente fica temporariamente indisponível.
 
 ## Remoção do painel
 
