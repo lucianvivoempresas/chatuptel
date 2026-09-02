@@ -24,6 +24,7 @@ import {
   isExternalWhatsAppOutgoing,
   isOutgoingMessage,
   markHumanManaged,
+  releaseHumanManagedAfterResolution,
   suppressQualificationBot,
 } from './bot-policy.js';
 import { agentNameFromPayload, formatAgentMessage } from './message-format.js';
@@ -768,6 +769,9 @@ async function disableBotForHumanConversation(chat) {
 async function humanAlreadyParticipated(chat) {
   if (chat?.botTestMode === true) return false;
   if (suppressQualificationBot(chat)) return true;
+  // Depois que o atendente resolve a conversa, o histórico humano anterior
+  // não deve bloquear o assistente no próximo contato do cliente.
+  if (chat?.botRestartAfterResolutionAt) return false;
 
   try {
     if (
@@ -2132,6 +2136,41 @@ async function handleChatwootWebhook(payload) {
   const payloadInboxId = Number(
     payload.inbox?.id || payload.conversation?.inbox_id || payload.inbox_id || 0,
   );
+
+  if (payload.event === 'conversation_status_changed') {
+    if (payloadInboxId > 0 && payloadInboxId !== config.chatwootInboxId) {
+      return { ignored: true };
+    }
+    const status = String(payload.status || payload.conversation?.status || '').toLowerCase();
+    if (status !== 'resolved') return { ignored: true };
+
+    const conversationId = Number(payload.conversation?.id || payload.id || payload.conversation_id);
+    const releasedChats = Object.values(state.chats).filter(
+      (chat) => Number(chat.conversationId) === conversationId,
+    );
+    for (const chat of releasedChats) releaseHumanManagedAfterResolution(chat);
+    await saveState();
+
+    if (conversationId > 0) {
+      try {
+        await mergeConversationAttributes(conversationId, {
+          atendimento_humano_ativo: false,
+          proxima_acao: 'Aguardar novo contato do cliente',
+        });
+      } catch (error) {
+        logger.warn(
+          { conversationId, error: error.message },
+          'Conversa resolvida, mas não foi possível atualizar o marcador humano',
+        );
+      }
+    }
+    logger.info(
+      { conversationId, chatsReleased: releasedChats.length },
+      'Conversa resolvida: assistente liberado para o próximo contato do cliente',
+    );
+    return { released: true, conversationId };
+  }
+
   if (
     payload.event !== 'message_created' ||
     !isOutgoingMessage(payload) ||

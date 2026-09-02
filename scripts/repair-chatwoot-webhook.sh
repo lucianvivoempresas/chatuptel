@@ -27,7 +27,7 @@ removed = scope.where.not(url: url).count
 scope.where.not(url: url).destroy_all
 
 webhook = Webhook.find_or_initialize_by(account_id: account_id, url: url)
-webhook.subscriptions = ["message_created"]
+webhook.subscriptions = ["message_created", "conversation_status_changed"]
 webhook.save!
 
 uri = URI(url)

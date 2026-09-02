@@ -15,12 +15,14 @@ atendente.
 6. O bot para de responder assim que um agente humano envia uma mensagem.
 7. Se a conversa foi iniciada por um agente, o menu não é exibido quando o
    cliente responder.
-8. A intervenção humana fica gravada no estado do gateway. Depois disso, nem
-   mesmo a palavra `menu` reativa o bot nessa conversa.
+8. A intervenção humana fica gravada no estado do gateway. Enquanto a conversa
+   estiver em atendimento, nem mesmo a palavra `menu` reativa o bot.
 9. Quando um agente inicia ou responde uma conversa, ela é automaticamente
    atribuída a esse agente e recebe a marca persistente de atendimento humano.
 10. Uma atribuição manual feita no Chatwoot também bloqueia imediatamente o
     menu, mesmo que o agente ainda não tenha enviado uma mensagem pública.
+11. Quando o agente marca a conversa como **Resolvida**, o bloqueio humano é
+    encerrado. O assistente só volta quando o cliente enviar uma nova mensagem.
 
 Enquanto nenhum agente tiver participado, o contato pode digitar `menu` para
 reiniciar a qualificação e `6` ou `falar com atendente` para solicitar

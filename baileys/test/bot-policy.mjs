@@ -8,6 +8,7 @@ import {
   isExternalWhatsAppOutgoing,
   isOutgoingMessage,
   markHumanManaged,
+  releaseHumanManagedAfterResolution,
   suppressQualificationBot,
 } from '../src/bot-policy.js';
 
@@ -86,6 +87,16 @@ assert.equal(chat.humanManaged, true);
 assert.equal(chat.bot.handoff, true);
 assert.equal(chat.bot.stage, 'human');
 assert.equal(chat.botTestMode, undefined);
+
+releaseHumanManagedAfterResolution(chat, '2026-07-29T13:00:00.000Z');
+assert.equal(chat.humanManaged, false);
+assert.equal(chat.humanManagedAt, undefined);
+assert.equal(chat.bot, undefined);
+assert.equal(chat.botRestartAfterResolutionAt, '2026-07-29T13:00:00.000Z');
+
+markHumanManaged(chat, '2026-07-29T14:00:00.000Z');
+assert.equal(chat.humanManaged, true);
+assert.equal(chat.botRestartAfterResolutionAt, undefined);
 assert.equal(
   isBotAuthoredMessage({
     sender: { id: 22, type: 'User', name: 'Assistente Uptel Conecta' },

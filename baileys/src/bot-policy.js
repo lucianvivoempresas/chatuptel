@@ -86,6 +86,7 @@ export function suppressQualificationBot(chat) {
 export function markHumanManaged(chat, timestamp = new Date().toISOString()) {
   delete chat.botTestMode;
   delete chat.botTestResetAt;
+  delete chat.botRestartAfterResolutionAt;
   chat.humanManaged = true;
   chat.humanManagedAt ||= timestamp;
   if (chat.bot) {
@@ -93,5 +94,18 @@ export function markHumanManaged(chat, timestamp = new Date().toISOString()) {
     chat.bot.stage = 'human';
     chat.bot.handoffAt ||= timestamp;
   }
+  return chat;
+}
+
+export function releaseHumanManagedAfterResolution(
+  chat,
+  timestamp = new Date().toISOString(),
+) {
+  delete chat.botTestMode;
+  delete chat.botTestResetAt;
+  chat.humanManaged = false;
+  delete chat.humanManagedAt;
+  delete chat.bot;
+  chat.botRestartAfterResolutionAt = timestamp;
   return chat;
 }

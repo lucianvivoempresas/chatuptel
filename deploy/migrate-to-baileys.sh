@@ -139,7 +139,7 @@ legacy_count = legacy_webhooks.count
 legacy_webhooks.destroy_all
 
 webhook = Webhook.find_or_initialize_by(account_id: account_id, url: webhook_url)
-webhook.subscriptions = ["message_created"]
+webhook.subscriptions = ["message_created", "conversation_status_changed"]
 webhook.save!
 
 puts "#{legacy_count} webhook(s) antigo(s) do WPPConnect removido(s)." if legacy_count.positive?
