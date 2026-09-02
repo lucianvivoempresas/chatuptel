@@ -128,6 +128,10 @@ Edition, outro membro da mesma caixa ainda pode abrir e responder a conversa;
 por isso, a transferência deve ser feita antes de outro agente assumir o
 atendimento.
 
+Os usuários humanos criados pelo script permanecem **Online**, com o
+desligamento automático desativado. O usuário técnico `Assistente Uptel
+Conecta` continua offline e não participa do rodízio.
+
 ## Configurar a operação
 
 Crie as equipes `vendas`, `energia` e `pos-venda`, as etiquetas comerciais e

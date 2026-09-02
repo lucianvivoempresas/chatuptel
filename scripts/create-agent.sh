@@ -81,8 +81,8 @@ ActiveRecord::Base.transaction do
 
   membership = AccountUser.find_or_initialize_by(account: account, user: user)
   membership.role = ENV.fetch("AGENT_ROLE", "agent")
-  membership.availability = :offline
-  membership.auto_offline = true
+  membership.availability = :online
+  membership.auto_offline = false
   membership.save!
 
   inbox.add_members([user.id]) unless inbox.members.exists?(user.id)
@@ -91,6 +91,8 @@ ActiveRecord::Base.transaction do
   puts "NOME=#{user.name}"
   puts "EMAIL=#{user.email}"
   puts "PAPEL=#{membership.role}"
+  puts "DISPONIBILIDADE=#{membership.availability}"
+  puts "DESLIGAMENTO_AUTOMATICO=#{membership.auto_offline ? "ativo" : "inativo"}"
   puts "CAIXA=#{inbox.name}"
 end
 '
