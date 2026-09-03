@@ -73,6 +73,11 @@ O cartão WhatsApp nativo do Chatwoot é exclusivo da API oficial da Meta. Ele
 continuará desativado ao usar Baileys; a conexão aparecerá como a caixa API
 `WhatsApp Uptel Conecta`.
 
+O Chatwoot 4.14 ou superior protege webhooks contra destinos privados. Como o
+gateway deste projeto fica deliberadamente isolado na rede Docker, mantenha
+`SAFE_FETCH_ALLOW_PRIVATE_NETWORK=true` no `.env`. A porta do Baileys continua
+publicada somente em `127.0.0.1` e protegida por token.
+
 ## Identificação dos atendentes
 
 As respostas públicas enviadas pelo Chatwoot recebem automaticamente o nome
