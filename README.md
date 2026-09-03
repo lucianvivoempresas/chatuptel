@@ -329,6 +329,14 @@ lote de mensagens atrasadas:
 ./scripts/reconnect-whatsapp-safely.sh
 ```
 
+Depois de validar a nova conexão, as mensagens preservadas podem ser
+reagendadas com intervalo seguro. O padrão é uma mensagem a cada 90 segundos;
+itens já entregues ou já presentes na fila são ignorados:
+
+```bash
+./scripts/restore-quarantined-outbound.sh 90
+```
+
 ## Importar histórico do WhatsApp
 
 É possível realizar uma sincronização única e idempotente dos últimos 30 dias.
