@@ -320,6 +320,15 @@ O resultado esperado contém `"status":"connected"`. A sessão fica persistida
 no volume `baileys_data`, portanto o QR não é solicitado após reinicializações
 normais.
 
+Se o status for `logged_out` e houver mensagens pendentes, não reconecte
+diretamente. O procedimento abaixo preserva a fila em quarentena, faz backup
+da sessão revogada e somente então gera um novo QR Code, evitando o disparo em
+lote de mensagens atrasadas:
+
+```bash
+./scripts/reconnect-whatsapp-safely.sh
+```
+
 ## Importar histórico do WhatsApp
 
 É possível realizar uma sincronização única e idempotente dos últimos 30 dias.
