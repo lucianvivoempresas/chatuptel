@@ -89,6 +89,7 @@ services:
     restart: unless-stopped
 
   baileys:
+    image: voltconnect-chat-baileys:local
     build:
       context: ./baileys
     depends_on:
@@ -110,6 +111,7 @@ services:
       WHATSAPP_RECIPIENT_PER_MINUTE: ${WHATSAPP_RECIPIENT_PER_MINUTE:-10}
       WHATSAPP_AGENT_DAILY_LIMIT: ${WHATSAPP_AGENT_DAILY_LIMIT:-500}
       WHATSAPP_HISTORY_SYNC_DAYS: ${WHATSAPP_HISTORY_SYNC_DAYS:-0}
+      CHATWOOT_POLL_INTERVAL_MS: ${CHATWOOT_POLL_INTERVAL_MS:-3000}
       ENERGIA_CRM_URL: ${ENERGIA_CRM_URL:-}
       ENERGIA_CRM_INTEGRATION_TOKEN: ${ENERGIA_CRM_INTEGRATION_TOKEN:-}
       GEMINI_API_KEYS: ${GEMINI_API_KEYS:-}

@@ -5,7 +5,7 @@ Atendimento multiusuário com:
 - Chatwoot Community Edition;
 - PostgreSQL e Redis privados;
 - gateway próprio baseado em Baileys;
-- conexão de um WhatsApp por QR Code;
+- conexão de até 20 WhatsApps, cada um com caixa, sessão e fila isoladas;
 - até cinco atendentes no mesmo painel;
 - arquitetura preparada para migração futura à API oficial.
 
@@ -72,6 +72,11 @@ BAILEYS_ADMIN_TOKEN=outro-segredo-gerado-com-openssl
 O cartão WhatsApp nativo do Chatwoot é exclusivo da API oficial da Meta. Ele
 continuará desativado ao usar Baileys; a conexão aparecerá como a caixa API
 `WhatsApp Uptel Conecta`.
+
+Para acrescentar outros números sem alterar o principal, siga
+[`docs/multiple-whatsapp-numbers.md`](docs/multiple-whatsapp-numbers.md). O
+limite de 20 é da arquitetura; a quantidade que pode ficar ativa ao mesmo tempo
+depende da CPU e da memória do servidor.
 
 O Chatwoot 4.14 ou superior protege webhooks contra destinos privados. Como o
 gateway deste projeto fica deliberadamente isolado na rede Docker, mantenha

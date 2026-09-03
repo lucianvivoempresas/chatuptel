@@ -130,6 +130,7 @@ unless inbox
   inbox = Inbox.create!(account: account, channel: channel, name: "WhatsApp Uptel Conecta")
 end
 inbox.update!(name: "WhatsApp Uptel Conecta") unless inbox.name == "WhatsApp Uptel Conecta"
+inbox.channel.update!(webhook_url: webhook_url) unless inbox.channel.webhook_url == webhook_url
 
 missing_member_ids = account.users.ids - inbox.members.ids
 inbox.add_members(missing_member_ids) if missing_member_ids.any?
@@ -138,14 +139,16 @@ legacy_webhooks = Webhook.where(account_id: account_id).where("LOWER(url) LIKE ?
 legacy_count = legacy_webhooks.count
 legacy_webhooks.destroy_all
 
-webhook = Webhook.find_or_initialize_by(account_id: account_id, url: webhook_url)
-webhook.subscriptions = ["message_created", "conversation_status_changed"]
-webhook.save!
+internal_webhooks = Webhook.where(account_id: account_id)
+  .where("url LIKE ?", "http://baileys%:3001/webhooks/chatwoot%")
+internal_count = internal_webhooks.count
+internal_webhooks.destroy_all
 
 puts "#{legacy_count} webhook(s) antigo(s) do WPPConnect removido(s)." if legacy_count.positive?
 puts "Identidade visual Uptel Conecta aplicada."
 puts "#{default_features.length} funcionalidades padrão da conta habilitadas."
-puts "Webhook do Chatwoot configurado automaticamente."
+puts "Webhook exclusivo da caixa configurado automaticamente."
+puts "#{internal_count} webhook(s) global(is) removido(s) para evitar replicação entre números." if internal_count.positive?
 puts "Caixa API #{inbox.name} configurada com ID #{inbox.id}."
 puts "CHATWOOT_TOKEN=#{admin_access_token.token}"
 puts "CHATWOOT_BOT_TOKEN=#{bot_access_token.token}"

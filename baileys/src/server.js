@@ -105,6 +105,10 @@ const config = {
     0,
     Math.min(30, Number(process.env.WHATSAPP_HISTORY_SYNC_DAYS || 0)),
   ),
+  chatwootPollIntervalMs: Math.max(
+    3000,
+    Math.min(300000, Number(process.env.CHATWOOT_POLL_INTERVAL_MS || 3000)),
+  ),
   sdrAiMaxCallsPerConversation: Math.max(
     1,
     Number(process.env.SDR_AI_MAX_CALLS_PER_CONVERSATION || 12),
@@ -2359,6 +2363,7 @@ app.get('/status', (request, response) => {
     chatwootOutboundRecovery: {
       lastPollAt: chatwootPollLastAt,
       lastError: chatwootPollLastError,
+      intervalMs: config.chatwootPollIntervalMs,
     },
     invoiceReading: {
       geminiConfigured: config.geminiApiKeys.length > 0,
@@ -2419,6 +2424,7 @@ app.get('/operations/status', (request, response) => {
     chatwootOutboundRecovery: {
       lastPollAt: chatwootPollLastAt,
       lastError: chatwootPollLastError,
+      intervalMs: config.chatwootPollIntervalMs,
     },
   });
 });
@@ -2635,7 +2641,7 @@ const outboundTimer = setInterval(() => {
 outboundTimer.unref();
 const chatwootPollTimer = setInterval(() => {
   void pollChatwootHumanMessages();
-}, 3000);
+}, config.chatwootPollIntervalMs);
 chatwootPollTimer.unref();
 void pollChatwootHumanMessages();
 if (Object.keys(state.crmOutbox).length > 0) {

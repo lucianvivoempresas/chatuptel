@@ -7,6 +7,8 @@ OPERATIONS_ENV="${OPERATIONS_ENV:-/etc/voltconnect-chat/operations.env}"
 STATE_DIR="${MONITOR_STATE_DIR:-/var/lib/voltconnect-chat}"
 STATE_FILE="${STATE_DIR}/monitor.state"
 BACKUP_DIR="${BACKUP_DIR:-${PROJECT_DIR}/backups}"
+MULTI_COMPOSE="${PROJECT_DIR}/.whatsapp-instances/compose.yml"
+REGISTRY="${PROJECT_DIR}/.whatsapp-instances/instances.tsv"
 
 if [ -f "$OPERATIONS_ENV" ]; then
   # shellcheck disable=SC1090
@@ -80,6 +82,29 @@ fi
 if [ "$FAILED" -gt 0 ] && \
   { [ "$FAILED" != "${PREVIOUS_FAILED:-0}" ] || [ $((NOW - LAST_ALERT)) -ge 1800 ]; }; then
   send_alert "ALERTA Uptel Conecta: ${FAILED} mensagem(ns) aguardando nova tentativa de envio."
+  LAST_ALERT=$NOW
+fi
+
+# As instâncias adicionais não expõem portas no host. Consulta cada gateway
+# por dentro da rede Docker e agrega os nomes com problema em um único alerta.
+EXTRA_UNHEALTHY=""
+if [ -s "$REGISTRY" ] && [ -s "$MULTI_COMPOSE" ]; then
+  while IFS="$(printf '\t')" read -r slug display_name inbox_id; do
+    [ -n "$slug" ] || continue
+    service="baileys-${slug}"
+    extra_body=$(docker compose -f "${PROJECT_DIR}/docker-compose.yml" -f "$MULTI_COMPOSE" \
+      exec -T "$service" node --input-type=module -e \
+      'const r=await fetch(`http://127.0.0.1:3001/operations/status?token=${encodeURIComponent(process.env.BAILEYS_ADMIN_TOKEN)}`);process.stdout.write(await r.text());if(!r.ok)process.exit(1)' \
+      2>/dev/null || printf '{"connection":"unreachable"}')
+    extra_status=$(printf '%s' "$extra_body" | sed -n 's/.*"connection":"\([^"]*\)".*/\1/p')
+    extra_status=${extra_status:-unreachable}
+    if [ "$extra_status" != connected ]; then
+      EXTRA_UNHEALTHY="${EXTRA_UNHEALTHY}${EXTRA_UNHEALTHY:+, }${slug}=${extra_status}"
+    fi
+  done < "$REGISTRY"
+fi
+if [ -n "$EXTRA_UNHEALTHY" ] && [ $((NOW - LAST_ALERT)) -ge 1800 ]; then
+  send_alert "ALERTA Uptel Conecta: WhatsApps adicionais com problema: ${EXTRA_UNHEALTHY}."
   LAST_ALERT=$NOW
 fi
 

@@ -23,12 +23,22 @@ case "$STAGE_DIR" in
   "${BACKUP_DIR}"/.stage.*) ;;
   *) echo "ERRO: diretório temporário fora da pasta de backup." >&2; exit 1 ;;
 esac
-BAILEYS_WAS_RUNNING=false
-cleanup() {
-  if [ "$BAILEYS_WAS_RUNNING" = true ]; then
-    cd "$PROJECT_DIR"
-    docker compose start baileys >/dev/null 2>&1 || true
+MULTI_COMPOSE="${PROJECT_DIR}/.whatsapp-instances/compose.yml"
+REGISTRY="${PROJECT_DIR}/.whatsapp-instances/instances.tsv"
+BAILEYS_RUNNING_SERVICES=""
+
+compose_stack() {
+  if [ -s "$MULTI_COMPOSE" ]; then
+    docker compose -f "${PROJECT_DIR}/docker-compose.yml" -f "$MULTI_COMPOSE" "$@"
+  else
+    docker compose -f "${PROJECT_DIR}/docker-compose.yml" "$@"
   fi
+}
+
+cleanup() {
+  for service in $BAILEYS_RUNNING_SERVICES; do
+    compose_stack start "$service" >/dev/null 2>&1 || true
+  done
   rm -rf -- "$STAGE_DIR"
 }
 trap cleanup EXIT HUP INT TERM
@@ -45,24 +55,33 @@ docker compose exec -T postgres pg_dump -U chatwoot -d chatwoot \
 
 # A sessão muda continuamente. Uma pausa curta evita um arquivo inconsistente
 # e o erro "file changed as we read it". O trap sempre religa o serviço.
-if docker compose ps --status running --services | grep -qx baileys; then
-  BAILEYS_WAS_RUNNING=true
-  BAILEYS_CONTAINER=$(docker compose ps -q baileys)
-  docker compose stop -t 20 baileys >/dev/null
-else
-  BAILEYS_CONTAINER=$(docker compose ps -a -q baileys)
+BAILEYS_SERVICES=baileys
+if [ -s "$REGISTRY" ]; then
+  while IFS="$(printf '\t')" read -r slug display_name inbox_id; do
+    [ -n "$slug" ] || continue
+    BAILEYS_SERVICES="${BAILEYS_SERVICES} baileys-${slug}"
+  done < "$REGISTRY"
 fi
-if [ -z "$BAILEYS_CONTAINER" ]; then
-  echo "ERRO: contêiner Baileys não encontrado." >&2
-  exit 1
-fi
-docker run --rm --volumes-from "${BAILEYS_CONTAINER}:ro" \
-  redis:7-alpine tar -czf - -C /data . \
-  > "${STAGE_DIR}/baileys-data.tar.gz"
-if [ "$BAILEYS_WAS_RUNNING" = true ]; then
-  docker compose start baileys >/dev/null
-  BAILEYS_WAS_RUNNING=false
-fi
+
+for service in $BAILEYS_SERVICES; do
+  if compose_stack ps --status running --services | grep -qx "$service"; then
+    BAILEYS_RUNNING_SERVICES="${BAILEYS_RUNNING_SERVICES} ${service}"
+    compose_stack stop -t 20 "$service" >/dev/null
+  fi
+  BAILEYS_CONTAINER=$(compose_stack ps -a -q "$service")
+  if [ -z "$BAILEYS_CONTAINER" ]; then
+    echo "ERRO: contêiner ${service} não encontrado." >&2
+    exit 1
+  fi
+  docker run --rm --volumes-from "${BAILEYS_CONTAINER}:ro" \
+    redis:7-alpine tar -czf - -C /data . \
+    > "${STAGE_DIR}/${service}-data.tar.gz"
+done
+
+for service in $BAILEYS_RUNNING_SERVICES; do
+  compose_stack start "$service" >/dev/null
+done
+BAILEYS_RUNNING_SERVICES=""
 
 RAILS_CONTAINER=$(docker compose ps -q rails)
 if [ -z "$RAILS_CONTAINER" ]; then
@@ -74,6 +93,9 @@ docker run --rm --volumes-from "${RAILS_CONTAINER}:ro" \
   > "${STAGE_DIR}/chatwoot-storage.tar.gz"
 
 cp docker-compose.yml "${STAGE_DIR}/docker-compose.yml"
+if [ -d .whatsapp-instances ]; then
+  cp -R .whatsapp-instances "${STAGE_DIR}/whatsapp-instances"
+fi
 git rev-parse HEAD > "${STAGE_DIR}/git-commit.txt" 2>/dev/null || true
 ARCHIVE="${BACKUP_DIR}/voltconnect-chat-${TIMESTAMP}.tar.gz.enc"
 

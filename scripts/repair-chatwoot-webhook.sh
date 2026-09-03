@@ -21,14 +21,15 @@ account_id = ENV.fetch("CHATWOOT_ACCOUNT_ID").to_i
 token = ENV.fetch("BAILEYS_ADMIN_TOKEN")
 url = "http://baileys:3001/webhooks/chatwoot?token=#{token}"
 
-scope = Webhook.where(account_id: account_id)
-  .where("url LIKE ?", "http://baileys:3001/webhooks/chatwoot%")
-removed = scope.where.not(url: url).count
-scope.where.not(url: url).destroy_all
+inbox_id = ENV.fetch("CHATWOOT_INBOX_ID").to_i
+inbox = Account.find(account_id).inboxes.find(inbox_id)
+raise "A caixa #{inbox_id} não é do tipo API" unless inbox.channel_type == "Channel::Api"
+inbox.channel.update!(webhook_url: url)
 
-webhook = Webhook.find_or_initialize_by(account_id: account_id, url: url)
-webhook.subscriptions = ["message_created", "conversation_status_changed"]
-webhook.save!
+scope = Webhook.where(account_id: account_id)
+  .where("url LIKE ?", "http://baileys%:3001/webhooks/chatwoot%")
+removed = scope.count
+scope.destroy_all
 
 uri = URI(url)
 request = Net::HTTP::Post.new(uri)
@@ -39,7 +40,7 @@ response = Net::HTTP.start(uri.host, uri.port, open_timeout: 5, read_timeout: 10
 end
 raise "Gateway respondeu HTTP #{response.code}" unless response.code.to_i == 200
 
-puts "WEBHOOK_OK id=#{webhook.id} subscriptions=#{webhook.subscriptions.join(",")} antigos_removidos=#{removed}"
+puts "WEBHOOK_CAIXA_OK inbox_id=#{inbox.id} globais_removidos=#{removed}"
 '
 
 echo "Verificando serviços..."
