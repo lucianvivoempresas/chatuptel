@@ -34,19 +34,23 @@ until curl --fail --silent http://127.0.0.1:3002/health >/dev/null 2>&1; do
   sleep 2
 done
 
-docker compose exec -T rails bundle exec rails runner '
+asset_version=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)
+docker compose exec -T -e UPTEL_ASSISTANT_ASSET_VERSION="$asset_version" rails bundle exec rails runner '
 marker_start = "<!-- uptel-assistant:start -->"
 marker_end = "<!-- uptel-assistant:end -->"
+asset_version = ENV.fetch("UPTEL_ASSISTANT_ASSET_VERSION")
 snippet = <<~HTML.strip
   #{marker_start}
-  <script defer src="/uptel-assistant/embed.js"></script>
+  <script defer src="/uptel-assistant/embed.js?v=#{asset_version}"></script>
   #{marker_end}
 HTML
 setting = InstallationConfig.find_or_initialize_by(name: "DASHBOARD_SCRIPTS")
 current = setting.value.to_s.gsub(/#{Regexp.escape(marker_start)}.*?#{Regexp.escape(marker_end)}/m, "").strip
 setting.value = [current, snippet].reject(&:empty?).join("\n")
 setting.save!
-puts "Painel do Assistente Uptel ativado no Chatwoot."
+setting.reload
+raise "O registro do painel não foi persistido" unless setting.value.to_s.include?(marker_start)
+puts "Painel do Assistente Uptel ativado no Chatwoot (versão #{asset_version})."
 '
 
 if [ "$(id -u)" -eq 0 ]; then
