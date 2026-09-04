@@ -14,9 +14,8 @@ read_env() {
 }
 
 if [ -z "$(read_env OPENAI_API_KEY)" ] && [ -z "$(read_env ZYLOO_API_KEY)" ]; then
-  echo "Erro: configure OPENAI_API_KEY ou ZYLOO_API_KEY no .env antes de instalar." >&2
-  echo "A chave não deve ser enviada ao GitHub nem colada em comandos do histórico." >&2
-  exit 1
+  echo "Aviso: nenhuma chave de IA foi configurada no .env." >&2
+  echo "O painel e a aba Números serão instalados; sugestões por IA ficarão indisponíveis." >&2
 fi
 
 chmod 600 .env
