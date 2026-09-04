@@ -58,6 +58,12 @@ const positiveNumber = (value, fallback) => {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 };
 
+const enabled = (value, fallback = true) => !['false', '0', 'no'].includes(
+  String(value ?? fallback).toLowerCase(),
+);
+
+const outboundEnabled = enabled(process.env.WHATSAPP_OUTBOUND_ENABLED, true);
+
 const config = {
   port: Number(process.env.PORT || 3001),
   authDir: process.env.BAILEYS_AUTH_DIR || '/data/auth',
@@ -72,12 +78,11 @@ const config = {
   ).trim(),
   chatwootBotUserId: Math.max(0, Number(process.env.CHATWOOT_BOT_USER_ID || 0)),
   defaultCountryCode: (process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '55').replace(/\D/g, ''),
-  prefixAgentName: !['false', '0', 'no'].includes(
-    String(process.env.WHATSAPP_PREFIX_AGENT_NAME || 'true').toLowerCase(),
-  ),
-  botEnabled: !['false', '0', 'no'].includes(
-    String(process.env.WHATSAPP_BOT_ENABLED || 'true').toLowerCase(),
-  ),
+  prefixAgentName: enabled(process.env.WHATSAPP_PREFIX_AGENT_NAME, true),
+  outboundEnabled,
+  botEnabled: outboundEnabled && enabled(process.env.WHATSAPP_BOT_ENABLED, true),
+  instanceSlug: String(process.env.WHATSAPP_INSTANCE_SLUG || 'principal').trim(),
+  instanceName: String(process.env.WHATSAPP_INSTANCE_NAME || 'Número principal').trim(),
   energiaCrmUrl: String(process.env.ENERGIA_CRM_URL || '').trim().replace(/\/+$/, ''),
   energiaCrmIntegrationToken: String(
     process.env.ENERGIA_CRM_INTEGRATION_TOKEN || '',
@@ -137,6 +142,7 @@ let state = {
   crmOutbox: {},
   outboundQueue: {},
   outboundDelivered: {},
+  outboundBlocked: {},
   sendLimits: {},
   historyImported: {},
   historyStats: {},
@@ -175,10 +181,23 @@ async function loadState() {
     state.crmOutbox ||= {};
     state.outboundQueue ||= {};
     state.outboundDelivered ||= {};
+    state.outboundBlocked ||= {};
     state.sendLimits ||= {};
     state.historyImported ||= {};
     state.historyStats ||= {};
     state.gatewaySentMessageIds ||= {};
+    if (!config.outboundEnabled && Object.keys(state.outboundQueue).length) {
+      const blockedAt = new Date().toISOString();
+      for (const [key, job] of Object.entries(state.outboundQueue)) {
+        state.outboundBlocked[key] = {
+          ...job,
+          blockedAt,
+          blockedReason: 'Número configurado somente para recebimento',
+        };
+      }
+      state.outboundQueue = {};
+      await saveState();
+    }
     if (Number(state.botPolicyVersion || 0) < 2) {
       for (const chat of Object.values(state.chats)) {
         delete chat.humanParticipationChecked;
@@ -1967,6 +1986,9 @@ function isRetryableWhatsAppError(error) {
 }
 
 async function sendWhatsAppMessage(jid, content) {
+  if (!config.outboundEnabled) {
+    throw new Error('Envio bloqueado: número configurado somente para recebimento');
+  }
   const registeredJid = await validateWhatsAppJid(jid);
   let lastError;
 
@@ -2067,7 +2089,12 @@ async function deliverOutboundJob(job) {
 }
 
 async function flushOutboundQueue() {
-  if (outboundFlushRunning || connectionStatus !== 'connected' || !socket) return;
+  if (
+    !config.outboundEnabled
+    || outboundFlushRunning
+    || connectionStatus !== 'connected'
+    || !socket
+  ) return;
   outboundFlushRunning = true;
   try {
     const jobs = Object.values(state.outboundQueue || {})
@@ -2185,6 +2212,52 @@ async function handleChatwootWebhook(payload) {
     (payloadInboxId > 0 && payloadInboxId !== config.chatwootInboxId)
   ) {
     return { ignored: true };
+  }
+  if (!config.outboundEnabled) {
+    const conversationId = Number(payload.conversation?.id || payload.conversation_id);
+    const key = String(payload.id || `${conversationId}-${auditHash(payload.content).slice(0, 16)}`);
+    if (!state.outboundBlocked[key]) {
+      state.outboundBlocked[key] = {
+        key,
+        messageId: payload.id || null,
+        conversationId,
+        agentId: payload.sender?.id || payload.user?.id || null,
+        createdAt: Date.now(),
+        blockedAt: new Date().toISOString(),
+        blockedReason: 'Número configurado somente para recebimento',
+        contentLength: String(payload.content || '').length,
+        contentSha256: auditHash(payload.content),
+      };
+      const blockedKeys = Object.keys(state.outboundBlocked);
+      for (const oldKey of blockedKeys.slice(0, Math.max(0, blockedKeys.length - 2000))) {
+        delete state.outboundBlocked[oldKey];
+      }
+      await saveState();
+      await auditEvent('outbound_blocked_inbound_only', {
+        chatwootMessageId: payload.id || null,
+        conversationId,
+        agentId: payload.sender?.id || payload.user?.id || null,
+      });
+      try {
+        await chatwootRequest(
+          `/api/v1/accounts/${config.chatwootAccountId}/conversations/${conversationId}/messages`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              content: 'Envio bloqueado: o número principal está configurado somente para recebimento. Responda pela caixa de um número ativo.',
+              message_type: 'outgoing',
+              private: true,
+              content_type: 'text',
+              content_attributes: { baileys_inbound_only_notice: true },
+            }),
+          },
+        );
+      } catch (error) {
+        logger.warn({ conversationId, error: error.message }, 'Não foi possível registrar o aviso de envio bloqueado');
+      }
+    }
+    logger.warn({ conversationId, messageId: payload.id }, 'Saída bloqueada no número principal receptivo');
+    return { blocked: true, mode: 'inbound_only' };
   }
   const jid = await findJid(payload);
   if (!jid) throw new Error('Não foi possível identificar o destinatário');
@@ -2349,7 +2422,16 @@ function authorized(request) {
 }
 
 app.get('/health', (_request, response) => {
-  response.status(200).json({ ok: true, status: connectionStatus });
+  response.status(200).json({
+    ok: true,
+    status: connectionStatus,
+    connectedNumber: socket?.user?.id || null,
+    instance: {
+      slug: config.instanceSlug,
+      name: config.instanceName,
+      mode: config.outboundEnabled ? 'active' : 'inbound_only',
+    },
+  });
 });
 
 app.get('/status', (request, response) => {
@@ -2359,6 +2441,8 @@ app.get('/status', (request, response) => {
     connectedNumber: socket?.user?.id || null,
     qrAvailable: Boolean(currentQr),
     pendingOutbound: Object.keys(state.outboundQueue || {}).length,
+    blockedOutbound: Object.keys(state.outboundBlocked || {}).length,
+    mode: config.outboundEnabled ? 'active' : 'inbound_only',
     pendingCrmSync: Object.keys(state.crmOutbox || {}).length,
     chatwootOutboundRecovery: {
       lastPollAt: chatwootPollLastAt,
@@ -2382,6 +2466,8 @@ app.get('/operations/status', (request, response) => {
     connection: connectionStatus,
     connectedNumber: socket?.user?.id || null,
     pendingOutbound: outbound.length,
+    blockedOutbound: Object.keys(state.outboundBlocked || {}).length,
+    mode: config.outboundEnabled ? 'active' : 'inbound_only',
     failedOutbound: outbound.filter((job) => Number(job.attempts || 0) > 0).length,
     oldestOutboundAt: outbound.length
       ? new Date(Math.min(...outbound.map((job) => Number(job.createdAt)))).toISOString()

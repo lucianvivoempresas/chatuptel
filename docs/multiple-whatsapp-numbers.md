@@ -9,6 +9,17 @@ até 19 adicionais. Cada número adicional recebe:
 - webhook exclusivo da caixa, sem replicar mensagens para os outros números;
 - volume persistente e inclusão no backup criptografado.
 
+O número principal opera somente em modo receptivo: recebe e registra as
+mensagens no Chatwoot, mas o gateway bloqueia respostas humanas e automáticas
+por esse número. Os adicionais operam em modo ativo. Mensagens de todas as
+caixas permanecem disponíveis na visão **Todos** do Chatwoot, preservando qual
+número recebeu ou enviou cada mensagem.
+
+O painel lateral do Assistente possui a aba **Números**, com o total conectado,
+desconectado, modo de cada sessão e horário da última verificação. O WhatsApp
+não permite copiar uma mensagem de outro chip para o aplicativo do número
+principal; a visualização central correta é o Chatwoot.
+
 ## Capacidade do servidor
 
 O limite de 20 é arquitetural, não uma promessa de que 20 sessões caibam no

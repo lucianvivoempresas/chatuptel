@@ -14,6 +14,8 @@ const child = spawn(process.execPath, ['src/server.js'], {
     CHATWOOT_ACCOUNT_ID: '1',
     CHATWOOT_INBOX_ID: '1',
     CHATWOOT_API_TOKEN: 'test-api-token',
+    WHATSAPP_OUTBOUND_ENABLED: 'false',
+    WHATSAPP_INSTANCE_SLUG: 'principal',
     BAILEYS_AUTH_DIR: path.join(testDirectory, 'auth'),
     BAILEYS_STATE_FILE: path.join(testDirectory, 'state.json'),
     BAILEYS_AUDIT_DIR: path.join(testDirectory, 'audit'),
@@ -46,13 +48,17 @@ try {
   }
 
   assert.equal(health?.ok, true, output);
+  assert.equal(health?.instance?.mode, 'inbound_only');
 
   const unauthorized = await fetch(`http://127.0.0.1:${port}/status`);
   assert.equal(unauthorized.status, 401);
 
   const status = await fetch(`http://127.0.0.1:${port}/status?token=test-token`);
   assert.equal(status.status, 200);
-  assert.equal(typeof (await status.json()).status, 'string');
+  const statusBody = await status.json();
+  assert.equal(typeof statusBody.status, 'string');
+  assert.equal(statusBody.mode, 'inbound_only');
+  assert.equal(statusBody.pendingOutbound, 0);
 
   const operations = await fetch(
     `http://127.0.0.1:${port}/operations/status?token=test-token`,

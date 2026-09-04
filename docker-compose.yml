@@ -105,7 +105,11 @@ services:
       CHATWOOT_BOT_USER_ID: ${CHATWOOT_BOT_USER_ID:-0}
       WHATSAPP_DEFAULT_COUNTRY_CODE: ${WHATSAPP_DEFAULT_COUNTRY_CODE:-55}
       WHATSAPP_PREFIX_AGENT_NAME: ${WHATSAPP_PREFIX_AGENT_NAME:-true}
-      WHATSAPP_BOT_ENABLED: ${WHATSAPP_BOT_ENABLED:-true}
+      # O número principal recebe e registra mensagens, mas nunca envia.
+      WHATSAPP_BOT_ENABLED: "false"
+      WHATSAPP_OUTBOUND_ENABLED: "false"
+      WHATSAPP_INSTANCE_SLUG: principal
+      WHATSAPP_INSTANCE_NAME: Número principal
       BAILEYS_AUDIT_RETENTION_DAYS: ${BAILEYS_AUDIT_RETENTION_DAYS:-90}
       WHATSAPP_GLOBAL_PER_MINUTE: ${WHATSAPP_GLOBAL_PER_MINUTE:-60}
       WHATSAPP_RECIPIENT_PER_MINUTE: ${WHATSAPP_RECIPIENT_PER_MINUTE:-10}
@@ -173,6 +177,8 @@ services:
       ZYLOO_MAX_TOKENS: ${ZYLOO_MAX_TOKENS:-700}
       ASSISTANT_RATE_LIMIT_PER_MINUTE: ${ASSISTANT_RATE_LIMIT_PER_MINUTE:-20}
       KNOWLEDGE_BASE_DIR: ${KNOWLEDGE_BASE_DIR:-/app/knowledge}
+      WHATSAPP_INSTANCES_FILE: /app/whatsapp-instances/instances.tsv
+      WHATSAPP_PRIMARY_INBOX_ID: ${CHATWOOT_INBOX_ID:?CHATWOOT_INBOX_ID não definido}
     ports:
       # O navegador acessa pelo Nginx; a porta permanece privada no servidor.
       - "127.0.0.1:3002:3002"
@@ -182,6 +188,7 @@ services:
       # Conteúdo comercial versionado e somente leitura. Atualizações de texto
       # não reiniciam nem modificam o Chatwoot ou o gateway do WhatsApp.
       - ./knowledge:/app/knowledge:ro
+      - ./.whatsapp-instances:/app/whatsapp-instances:ro
       - assistant_data:/data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]

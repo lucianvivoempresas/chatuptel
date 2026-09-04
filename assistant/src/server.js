@@ -50,6 +50,8 @@ const AI_MAX_COST_PER_CONVERSATION = Math.max(0.001, Number(process.env.ASSISTAN
 const USAGE_STATE_FILE = process.env.ASSISTANT_USAGE_STATE_FILE || '/data/usage.json';
 const RATE_LIMIT = Number.parseInt(process.env.ASSISTANT_RATE_LIMIT_PER_MINUTE || '20', 10);
 const KNOWLEDGE_BASE_DIR = process.env.KNOWLEDGE_BASE_DIR || '/app/knowledge';
+const WHATSAPP_INSTANCES_FILE = process.env.WHATSAPP_INSTANCES_FILE || '/app/whatsapp-instances/instances.tsv';
+const WHATSAPP_PRIMARY_INBOX_ID = Number.parseInt(process.env.WHATSAPP_PRIMARY_INBOX_ID || '0', 10);
 const MAX_BODY_BYTES = 32 * 1024;
 const requestCounters = new Map();
 let modelCache = { expiresAt: 0, model: null };
@@ -91,6 +93,110 @@ export function normalizeText(value, maxLength = 4000) {
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .trim()
     .slice(0, maxLength);
+}
+
+export function parseWhatsAppRegistry(content = '') {
+  return String(content)
+    .split(/\r?\n/)
+    .map(line => line.split('\t'))
+    .filter(([slug, , inboxId]) => /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(slug || '') && Number(inboxId) > 0)
+    .slice(0, 19)
+    .map(([slug, displayName, inboxId]) => ({
+      slug,
+      name: normalizeText(displayName || slug, 80),
+      inboxId: Number(inboxId),
+      service: `baileys-${slug}`,
+      configuredMode: 'active',
+    }));
+}
+
+function connectedPhone(value) {
+  const digits = String(value || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+  return digits || null;
+}
+
+async function configuredWhatsAppInstances() {
+  let extras = [];
+  try {
+    extras = parseWhatsAppRegistry(await readFile(WHATSAPP_INSTANCES_FILE, 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  return [
+    {
+      slug: 'principal',
+      name: 'Número principal',
+      inboxId: WHATSAPP_PRIMARY_INBOX_ID,
+      service: 'baileys',
+      configuredMode: 'inbound_only',
+    },
+    ...extras,
+  ].filter(instance => instance.inboxId > 0);
+}
+
+async function gatewayHealth(instance) {
+  try {
+    const response = await fetch(`http://${instance.service}:3001/health`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const status = normalizeText(payload.status || 'unknown', 30).toLowerCase();
+    return {
+      ...instance,
+      status,
+      online: status === 'connected',
+      phone: connectedPhone(payload.connectedNumber),
+      mode: payload.instance?.mode || instance.configuredMode,
+    };
+  } catch {
+    return {
+      ...instance,
+      status: 'unreachable',
+      online: false,
+      phone: null,
+      mode: instance.configuredMode,
+    };
+  }
+}
+
+function inboxList(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.payload)) return payload.payload;
+  if (Array.isArray(payload?.data?.payload)) return payload.data.payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+}
+
+async function whatsappDashboard(request, accountId) {
+  if (!Number.isInteger(accountId) || accountId <= 0) {
+    throw Object.assign(new Error('Conta inválida'), { status: 400 });
+  }
+  const authHeaders = chatwootAuthHeaders(request);
+  if (!authHeaders['access-token'] || !authHeaders.client || !authHeaders.uid) {
+    throw Object.assign(new Error('Entre novamente no Chatwoot'), { status: 401 });
+  }
+  checkRateLimit(`${authHeaders.uid}:${accountId}:whatsapp-status`);
+  const permittedInboxes = inboxList(await chatwootRequest(
+    `/api/v1/accounts/${accountId}/inboxes`,
+    authHeaders,
+  ));
+  const permittedIds = new Set(permittedInboxes.map(inbox => Number(inbox.id)).filter(Boolean));
+  const configured = (await configuredWhatsAppInstances())
+    .filter(instance => permittedIds.has(instance.inboxId));
+  const numbers = await Promise.all(configured.map(gatewayHealth));
+  return {
+    checkedAt: new Date().toISOString(),
+    totals: {
+      configured: numbers.length,
+      connected: numbers.filter(item => item.online).length,
+      disconnected: numbers.filter(item => !item.online).length,
+      activeOutbound: numbers.filter(item => item.mode === 'active').length,
+      inboundOnly: numbers.filter(item => item.mode === 'inbound_only').length,
+    },
+    numbers,
+  };
 }
 
 export function renderTranscript(payload) {
@@ -529,6 +635,10 @@ export async function handleRequest(request, response) {
         usage: usageSummary(),
         knowledge: await knowledgeBase.status(),
       });
+    }
+    if (request.method === 'GET' && url.pathname === '/uptel-assistant/api/whatsapp-status') {
+      const accountId = Number.parseInt(url.searchParams.get('accountId') || '0', 10);
+      return sendJson(response, 200, await whatsappDashboard(request, accountId));
     }
     if (request.method === 'POST' && url.pathname === '/uptel-assistant/api/suggest') {
       const body = await readJsonBody(request);

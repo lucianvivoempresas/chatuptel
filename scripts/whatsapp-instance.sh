@@ -72,6 +72,8 @@ generate_compose() {
       BAILEYS_AUTH_DIR: /data/auth
       BAILEYS_STATE_FILE: /data/state.json
       CHATWOOT_POLL_INTERVAL_MS: 15000
+      WHATSAPP_OUTBOUND_ENABLED: "true"
+      WHATSAPP_INSTANCE_SLUG: ${slug}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

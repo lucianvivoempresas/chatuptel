@@ -8,8 +8,22 @@ import {
   extractJsonObject,
   needsCatalogPriceFallback,
   normalizeText,
+  parseWhatsAppRegistry,
   renderTranscript,
 } from '../src/server.js';
+
+test('parseWhatsAppRegistry accepts only safe unique gateway descriptors', () => {
+  const rows = [
+    'vendas2\tVendas 2\t7',
+    '../invasor\tInválido\t8',
+    'suporte\tSuporte\t9',
+    'sem-id\tSem caixa\t0',
+  ].join('\n');
+  assert.deepEqual(parseWhatsAppRegistry(rows), [
+    { slug: 'vendas2', name: 'Vendas 2', inboxId: 7, service: 'baileys-vendas2', configuredMode: 'active' },
+    { slug: 'suporte', name: 'Suporte', inboxId: 9, service: 'baileys-suporte', configuredMode: 'active' },
+  ]);
+});
 
 test('extractJsonObject accepts fenced model output', () => {
   assert.deepEqual(extractJsonObject('```json\n{"suggested_reply":"Olá"}\n```'), { suggested_reply: 'Olá' });

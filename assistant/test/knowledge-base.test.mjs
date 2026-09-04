@@ -91,8 +91,12 @@ Oferta mensal.
   assert.equal(knowledgeDocumentState(monthly, '2026-09-01'), 'expired');
 });
 
-test('versioned repository knowledge loads without errors and ignores template drafts', async () => {
-  const base = createKnowledgeBase({ directory: repositoryKnowledge, cacheMs: 0 });
+test('versioned August repository knowledge loads without errors and ignores template drafts', async () => {
+  const base = createKnowledgeBase({
+    directory: repositoryKnowledge,
+    cacheMs: 0,
+    today: () => '2026-08-28',
+  });
   const status = await base.status();
   assert.equal(status.available, true);
   assert.equal(status.documents, 7);
